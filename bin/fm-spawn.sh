@@ -185,6 +185,18 @@
 # resolver because `cursor` is not the CLI name. A cursor SECONDMATE instead runs
 # the tracked project-scope .cursor/hooks.json in its own home, whose stop-hook
 # park owns that home's supervision (docs/supervision-protocols/cursor.md).
+# Publishing the record and moving this home's backlog item to In flight are one
+# step, not two: bin/fm-backlog-transition-lib.sh owns that invariant, and this
+# script performs the transition under the task's own meta lock before it reports
+# success. A ship or scout dispatch therefore REFUSES up front, before any
+# endpoint, worktree, or record exists, when the home's backlog has no item for
+# the id or already records it as finished, and a transition that fails after
+# publication removes the record it just wrote rather than leaving a worker the
+# backlog does not own. A relaunch re-reads the row instead of re-running the
+# transition, so an already In-flight item is left untouched. The transition is
+# skipped entirely for --secondmate spawns (persistent agents are not work
+# items), on a config/backlog-backend=manual home, without a compatible
+# tasks-axi, and in a home that keeps no data/backlog.md.
 # On success prints: spawned <id> harness=<name> kind=<ship|scout|secondmate> [mode=<mode> yolo=<on|off>] window=<backend-target> worktree=<path>
 # A ship task records the explicit mode/yolo it was passed; a secondmate spawn records
 # mode=secondmate, yolo=off, home=, and projects=; a scout records neither, and both the
@@ -269,6 +281,10 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-trace-context-lib.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh
 . "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
+# shellcheck source=bin/fm-tasks-axi-lib.sh
+. "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-backlog-transition-lib.sh
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
 # a direct report (see bin/fm-gate-refuse-lib.sh).
 fm_refuse_if_gate_agent
@@ -1914,6 +1930,28 @@ herdr_projection_existing_meta_allows_flat() {  # <meta>
   esac
 }
 
+# Backlog preflight (bin/fm-backlog-transition-lib.sh). This spawn is about to
+# become the sole owner of the row's In-flight transition, so prove the row is
+# transitionable BEFORE any endpoint, worktree, or record exists: a refusal here
+# costs nothing to unwind, while the same refusal after publication would strand
+# a live pane. The authoritative mutation still runs under the meta lock below.
+BACKLOG_TRANSITION=0
+BACKLOG_ROW_STATE=
+if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
+  BACKLOG_TRANSITION=1
+  BACKLOG_ROW_STATE=$(fm_backlog_row_state "$DATA" "$ID" || true)
+  case "$BACKLOG_ROW_STATE" in
+    '')
+      echo "error: task $ID has no backlog item in this home, so dispatching it would leave a worker no record owns; add it first (tasks-axi add $ID '<title>' --kind $KIND) and re-run" >&2
+      exit 1
+      ;;
+    done\ *)
+      echo "error: this home's backlog records $ID as finished; refusing to dispatch onto a closed item (reopen it with tasks-axi reopen $ID, or use a new task id)" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
   # Adopt the recorded endpoint instead of creating one. This is what keeps a
@@ -2756,14 +2794,65 @@ preserve_relaunch_meta() {
     echo "control_relaunch_tx=$FM_CONTROL_RELAUNCH_TX"
   fi
 } > "$SPAWN_META_PATH"
+
+# Fuse the backlog In-flight transition into the publication that just created
+# the record (bin/fm-backlog-transition-lib.sh owns the invariant). It runs under
+# this task's own meta lock, so a steer or teardown racing the same id stays
+# serialized exactly as before, and it runs before the launch below so a failure
+# is still unwindable.
+spawn_commit_backlog_transition() {
+  local row
+  [ "$BACKLOG_TRANSITION" = 1 ] || return 0
+  # Re-verify rather than assume. A relaunch republishes a record whose row is
+  # normally already In flight, and blindly re-running the transition on a row
+  # tasks-axi has since closed would silently resurrect it.
+  row=$(fm_backlog_row_state "$DATA" "$ID" || true)
+  case "$row" in
+    in_flight\ *) return 0 ;;
+  esac
+  fm_backlog_start "$DATA" "$ID"
+}
+
 if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_META_PUBLISH_STARTED=1
   mv -f "$SPAWN_META_TMP" "$STATE/$ID.meta"
   RELAUNCH_REPLACEMENT_PENDING=0
   SPAWN_META_PUBLISH_STARTED=0
   SPAWN_META_TMP=
+  if ! spawn_commit_backlog_transition; then
+    fm_lock_release "$SPAWN_META_LOCK"
+    SPAWN_META_LOCK_HELD=0
+    echo "error: task $ID was republished but its backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); the task's record and local copy are untouched - fix the backlog and re-run the relaunch" >&2
+    exit 1
+  fi
   fm_lock_release "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=0
+else
+  # The fresh path published the record under the task-set lock; take this task's
+  # own meta lock for the paired backlog transition, matching every other
+  # single-record mutation in this file.
+  if [ "$BACKLOG_TRANSITION" = 1 ]; then
+    SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
+    fm_lock_acquire_wait "$SPAWN_META_LOCK"
+    SPAWN_META_LOCK_HELD=1
+    if ! spawn_commit_backlog_transition; then
+      # Remove the record this process just published, and the busy generation
+      # armed alongside it, rather than leave a worker the backlog does not own.
+      # The endpoint and local copy are named because nothing else now points at
+      # them.
+      rm -f "$STATE/$ID.meta"
+      if [ -n "${BUSY_GEN:-}" ]; then
+        "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" \
+          || echo "warning: could not retire the busy generation armed for $ID" >&2
+      fi
+      fm_lock_release "$SPAWN_META_LOCK"
+      SPAWN_META_LOCK_HELD=0
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
+      exit 1
+    fi
+    fm_lock_release "$SPAWN_META_LOCK"
+    SPAWN_META_LOCK_HELD=0
+  fi
 fi
 if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
   # The record is published, so this task is now part of the set a teardown

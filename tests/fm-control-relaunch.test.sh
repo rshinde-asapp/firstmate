@@ -246,6 +246,38 @@ SH
   chmod +x "$1/fakebin/rm"
 }
 
+# Give a case home a real backlog carrying <id>, so the relaunch path's paired
+# backlog transition (bin/fm-backlog-transition-lib.sh) is live rather than
+# skipped for want of a backlog file.
+seed_backlog() {  # <case-dir> <id> <queued|in_flight>
+  local dir=$1 id=$2 want=$3 file="$1/home/data/backlog.md"
+  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$file"
+  tasks-axi add "$id" "relaunch fixture task" --kind ship --file "$file" >/dev/null
+  [ "$want" != in_flight ] || tasks-axi start "$id" --file "$file" >/dev/null
+}
+
+backlog_state() {  # <case-dir> <id>
+  tasks-axi show "$2" --file "$1/home/data/backlog.md" 2>/dev/null |
+    sed -n 's/^  state: *//p' | head -1
+}
+
+# Shadow tasks-axi so every `start` fails and every other verb is real. A
+# relaunch that re-reads the row before acting never calls it; one that assumes
+# it must re-run the transition trips over it.
+break_tasks_axi_start() {  # <case-dir>
+  local dir=$1 real
+  real=$(command -v tasks-axi)
+  cat > "$dir/fakebin/tasks-axi" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = start ]; then
+  echo 'error: "start refused"' >&2
+  exit 1
+fi
+exec "$real" "\$@"
+SH
+  chmod +x "$dir/fakebin/tasks-axi"
+}
+
 # --- 1. same-harness relaunch -----------------------------------------------
 
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint() {
@@ -1312,6 +1344,41 @@ test_spawn_relaunch_refuses_a_pane_outside_the_worktree() {
   pass "fm-spawn --relaunch: refuses to start a replacement outside the copy holding the work"
 }
 
+test_relaunch_reverifies_an_already_in_flight_item_instead_of_rewriting_it() {
+  local dir out rc=0
+  command -v tasks-axi >/dev/null 2>&1 || {
+    pass "skipped: tasks-axi is not installed, so the backlog transition is inert"
+    return 0
+  }
+  dir=$(new_case reverify rl40)
+  add_ship_task "$dir" rl40 claude
+  seed_backlog "$dir" rl40 in_flight
+  break_tasks_axi_start "$dir"
+
+  out=$(run_control "$dir" rl40 relaunch --note "picking the work back up") || rc=$?
+  expect_code 0 "$rc" "a relaunch must not re-run a transition the row already reflects"$'\n'"$out"
+  [ "$(backlog_state "$dir" rl40)" = in_flight ] \
+    || fail "a relaunch changed an already In-flight item to $(backlog_state "$dir" rl40)"
+  pass "relaunch re-reads the backlog item instead of blindly re-running the transition"
+}
+
+test_relaunch_moves_a_drifted_item_back_in_flight() {
+  local dir out rc=0
+  command -v tasks-axi >/dev/null 2>&1 || {
+    pass "skipped: tasks-axi is not installed, so the backlog transition is inert"
+    return 0
+  }
+  dir=$(new_case drifted rl41)
+  add_ship_task "$dir" rl41 claude
+  seed_backlog "$dir" rl41 queued
+
+  out=$(run_control "$dir" rl41 relaunch --note "picking the work back up") || rc=$?
+  expect_code 0 "$rc" "a relaunch onto a drifted item should succeed"$'\n'"$out"
+  [ "$(backlog_state "$dir" rl41)" = in_flight ] \
+    || fail "a relaunch left its item at $(backlog_state "$dir" rl41)"
+  pass "relaunch heals an item that drifted out of In flight while the task stayed live"
+}
+
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint
 test_relaunch_preserves_durable_task_metadata
 test_relaunch_serializes_concurrent_durable_metadata_publication
@@ -1358,3 +1425,5 @@ test_spawn_relaunch_refuses_a_live_agent
 test_spawn_relaunch_refuses_contradicting_flags
 test_spawn_relaunch_refuses_an_unrecorded_task
 test_spawn_relaunch_refuses_a_pane_outside_the_worktree
+test_relaunch_reverifies_an_already_in_flight_item_instead_of_rewriting_it
+test_relaunch_moves_a_drifted_item_back_in_flight

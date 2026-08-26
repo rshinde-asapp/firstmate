@@ -12,6 +12,7 @@
 #                 "CREW_DISPATCH: invalid config/crew-dispatch.json - <reason>",
 #                 "FLEET_SYNC: <repo>: skipped|recovered|STUCK: <detail>",
 #                 "PR_CHECK_MIGRATION: <private remediation>",
+#                 "BACKLOG_RECONCILE: <id>: <what this home could not reconcile>",
 #                 "TANGLE: <remediation>",
 #                 "SECONDMATE_SYNC: secondmate <id>: skipped: <reason>",
 #                 "NUDGE_SECONDMATES: secondmate <id>: send failed: <reason>",
@@ -79,9 +80,21 @@
 #          refresh relays any completed fm-fleet-sync.sh output before the
 #          aggregate timeout skip line with timeout and elapsed seconds.
 #          Set FM_FLEET_PRUNE=0 to skip branch pruning during that refresh.
-#          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the six MUTATING sweeps
-#          (PR-check migration, secondmate_sync, secondmate_liveness_sweep,
-#          secondmate_handoff_resume, x_mode_setup, fleet_sync) while still
+#          BACKLOG_RECONCILE lines report what backlog_record_reconcile could not
+#          settle in THIS home. Every ordinary dispatch and completion now moves
+#          the backlog row inside the script that moves the task's record
+#          (bin/fm-backlog-transition-lib.sh), so this sweep exists for the
+#          crash window inside those scripts and for drift a home was already
+#          carrying: it finishes a close an interrupted cleanup recorded, and
+#          marks In flight any item this home already owns a worker for. It
+#          never touches a captain-held or closed item, and never reads or
+#          writes another home; the fleet snapshot's classifier and
+#          bin/fm-secondmate-reconcile.sh's nudge stay as backstops. Successful
+#          reconciliations print BOOTSTRAP_INFO facts.
+#          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the seven MUTATING sweeps
+#          (PR-check migration, backlog_record_reconcile, secondmate_sync,
+#          secondmate_liveness_sweep, secondmate_handoff_resume, x_mode_setup,
+#          fleet_sync) while still
 #          printing every read-only detect line
 #          above; the TANGLE line switches to advisory-only wording with no
 #          checkout command. Used by
@@ -89,7 +102,7 @@
 #          the fleet lock, so a second concurrent session never race-mutates
 #          PR-check artifacts, secondmate homes, pending handoff outboxes,
 #          X-mode artifacts, project clones, or repair instructions.
-#          Unset/0 (the default) runs all six sweeps - this flag is purely
+#          Unset/0 (the default) runs all seven sweeps - this flag is purely
 #          additive.
 #          Set FM_BOOTSTRAP_NETWORK to split this run by whether a step talks to
 #          the network, so a session start can print its digest from local reads
@@ -102,7 +115,8 @@
 #                 secondmate_handoff_resume, and fleet_sync.
 #            only - ONLY those network steps and nothing else. No tool detection,
 #                 no version floors, no tangle check, no PR-check migration, no
-#                 x_mode_setup: those already ran on the local pass.
+#                 backlog reconciliation, no x_mode_setup: those already ran on
+#                 the local pass.
 #          FM_BOOTSTRAP_DETECT_ONLY composes with it unchanged, so `only` plus
 #          detect-only is the read-only `gh auth status` probe on its own.
 #          bin/fm-startup-network.sh owns the deferral: it runs the `only` phase
@@ -138,6 +152,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 # shellcheck source=bin/fm-tasks-axi-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-backlog-transition-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 # shellcheck source=bin/fm-quota-axi-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-quota-axi-lib.sh"
 # shellcheck source=bin/fm-tangle-lib.sh disable=SC1091
@@ -1165,6 +1181,65 @@ crew_dispatch_validate() {
   fi
 }
 
+# Same-home record reconciliation. Every ordinary dispatch and completion now
+# moves the backlog row inside the script that moves the task's record
+# (bin/fm-backlog-transition-lib.sh), so the only ways the two can still
+# disagree are a process killed mid-transition and drift a home was already
+# carrying before that pairing existed. Heal this home's OWN books on its own
+# restart rather than waiting for a parent's cross-home nudge; the fleet
+# snapshot's classifier and bin/fm-secondmate-reconcile.sh's nudge stay as
+# backstops for what this cannot see. Never reads or writes another home.
+backlog_record_reconcile() {
+  local marker meta id row in_flight_ids label has_record=0
+  # `ship` stands for "any backlog-tracked kind" in this gate: the per-record
+  # loop below still skips secondmates individually.
+  fm_backlog_transition_applies "$CONFIG" "$DATA" ship || return 0
+
+  # Finish any close an interrupted cleanup recorded but never landed.
+  for marker in "$STATE"/*.backlog-close; do
+    [ -e "$marker" ] || continue
+    label=$(basename "$marker" .backlog-close)
+    if fm_backlog_close_marker_replay "$STATE" "$marker"; then
+      [ "$FM_BACKLOG_CLOSE_REPLAY_RESULT" = closed ] || continue
+      echo "BOOTSTRAP_INFO: closed the backlog item for $label that an interrupted cleanup left open"
+    else
+      echo "BACKLOG_RECONCILE: $label: recorded backlog close could not be replayed: $FM_BACKLOG_TRANSITION_ERROR"
+    fi
+  done
+
+  # A home that owns no records has nothing to pair, so it never pays for a
+  # backlog read. One list read then answers the healthy case for every record
+  # at once, and only a record whose row is NOT already in flight costs a
+  # second lookup.
+  for meta in "$STATE"/*.meta; do
+    [ -e "$meta" ] || continue
+    has_record=1
+    break
+  done
+  [ "$has_record" = 1 ] || return 0
+  in_flight_ids=$(cd "$(fm_backlog_root "$DATA")" 2>/dev/null &&
+    tasks-axi list --state in_flight --file "$(fm_backlog_file "$DATA")" 2>/dev/null |
+    sed -n 's/^  \([^,]*\),.*/\1/p') || in_flight_ids=
+  for meta in "$STATE"/*.meta; do
+    [ -e "$meta" ] || continue
+    id=$(basename "$meta" .meta)
+    case "$in_flight_ids" in
+      "$id"|"$id"$'\n'*|*$'\n'"$id"|*$'\n'"$id"$'\n'*) continue ;;
+    esac
+    [ "$(fm_meta_get "$meta" kind)" = secondmate ] && continue
+    row=$(fm_backlog_row_state "$DATA" "$id" || true)
+    # Heal only the unambiguous case: a queued row for a record this home
+    # already owns. A held row is the captain's to move, and a closed row is a
+    # contradiction this sweep must not resolve by resurrecting the item.
+    [ "$row" = "queued no" ] || continue
+    if fm_backlog_start "$DATA" "$id"; then
+      echo "BOOTSTRAP_INFO: marked $id in flight to match the worker this home already owns"
+    else
+      echo "BACKLOG_RECONCILE: $id: worker record exists but its backlog item could not be moved to In flight: $FM_BACKLOG_TRANSITION_ERROR"
+    fi
+  done
+}
+
 startup_memory_budget_setup() {
   # Primary bootstrap owns default publication. A secondmate is deliberately
   # passive here because its setting must converge from the primary through the
@@ -1201,6 +1276,7 @@ fi
 if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ] && local_phase; then
   "$SCRIPT_DIR/fm-pr-check-migrate.sh" || true
   startup_memory_budget_setup
+  backlog_record_reconcile
 fi
 
 # Local detection: presence, version floors, and configuration. Nothing here
