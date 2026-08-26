@@ -315,6 +315,32 @@ test_recovery_replays_a_close_an_interrupted_cleanup_left_open() {
   pass "session start finishes a close an interrupted cleanup recorded but never landed"
 }
 
+test_recovery_preserves_a_close_when_the_backlog_cannot_be_read() {
+  local case_dir id out
+  id=atomic-heal-read-error-b10
+  case_dir=$(make_home heal-read-error)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  printf 'id=%s\ndata=%s\narg=--note\narg=local main\n' \
+    "$id" "$(home_of "$case_dir")/data" \
+    > "$(home_of "$case_dir")/state/$id.backlog-close"
+  break_verb "$case_dir" show
+
+  out=$(run_bootstrap "$case_dir")
+  assert_present "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "a transient backlog read failure discarded the pending close"
+  rm -f "$case_dir/fakebin/tasks-axi"
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] \
+    || fail "a failed recovery changed the backlog row: $out"
+
+  out=$(run_bootstrap "$case_dir")
+  [ "$(row_state "$case_dir" "$id")" = "done" ] \
+    || fail "the preserved close was not retried after the read recovered: $out"
+  assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "a successfully retried close left its marker behind"
+  pass "session start preserves a pending close across a transient backlog read failure"
+}
+
 test_recovery_drops_a_recorded_close_whose_task_is_still_owned() {
   local case_dir id out
   id=atomic-heal-b10
@@ -419,6 +445,7 @@ test_completion_closes_a_scout_with_its_report
 test_completion_fails_loudly_and_records_the_close_it_still_owes
 test_recovery_marks_an_owned_record_in_flight
 test_recovery_replays_a_close_an_interrupted_cleanup_left_open
+test_recovery_preserves_a_close_when_the_backlog_cannot_be_read
 test_recovery_drops_a_recorded_close_whose_task_is_still_owned
 test_recovery_leaves_a_captain_held_item_alone
 test_manual_backend_home_dispatches_and_completes_without_touching_the_backlog

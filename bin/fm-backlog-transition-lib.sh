@@ -44,6 +44,9 @@
 FM_BACKLOG_TRANSITION_SKIP=
 # Set by the mutating helpers when they return non-zero.
 FM_BACKLOG_TRANSITION_ERROR=
+FM_BACKLOG_ROW_RESULT=
+FM_BACKLOG_ROW_STATE=
+FM_BACKLOG_ROW_ERROR=
 # Set by fm_backlog_close_marker_replay: closed | stale | noop.
 # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
 FM_BACKLOG_CLOSE_REPLAY_RESULT=
@@ -83,15 +86,37 @@ fm_backlog_transition_applies() {  # <config-dir> <data-dir> <kind>
   return 0
 }
 
+fm_backlog_row_probe() {  # <data-dir> <id>
+  local data=$1 id=$2 out state held
+  FM_BACKLOG_ROW_RESULT=error
+  FM_BACKLOG_ROW_STATE=
+  FM_BACKLOG_ROW_ERROR=
+  if ! out=$(tasks-axi show "$id" --file "$(fm_backlog_file "$data")" 2>&1); then
+    if printf '%s\n' "$out" | grep -q '^code: NOT_FOUND$'; then
+      FM_BACKLOG_ROW_RESULT=not_found
+    else
+      FM_BACKLOG_ROW_ERROR=$(printf '%s\n' "$out" | sed -n '1p')
+      [ -n "$FM_BACKLOG_ROW_ERROR" ] \
+        || FM_BACKLOG_ROW_ERROR="tasks-axi show $id failed with no output"
+    fi
+    return 1
+  fi
+  state=$(printf '%s\n' "$out" | sed -n 's/^  state: *//p' | head -1)
+  held=$(printf '%s\n' "$out" | sed -n 's/^  held: *//p' | head -1)
+  if [ -z "$state" ]; then
+    FM_BACKLOG_ROW_ERROR="tasks-axi show $id returned no state"
+    return 1
+  fi
+  FM_BACKLOG_ROW_RESULT=found
+  FM_BACKLOG_ROW_STATE="$state ${held:-no}"
+  return 0
+}
+
 # Echo "<state> <held>" for one row, e.g. "queued no" / "in_flight yes".
 # Returns 1 when the row does not exist or cannot be read.
 fm_backlog_row_state() {  # <data-dir> <id>
-  local data=$1 id=$2 out state held
-  out=$(tasks-axi show "$id" --file "$(fm_backlog_file "$data")" 2>/dev/null) || return 1
-  state=$(printf '%s\n' "$out" | sed -n 's/^  state: *//p' | head -1)
-  held=$(printf '%s\n' "$out" | sed -n 's/^  held: *//p' | head -1)
-  [ -n "$state" ] || return 1
-  printf '%s %s\n' "$state" "${held:-no}"
+  fm_backlog_row_probe "$1" "$2" || return 1
+  printf '%s\n' "$FM_BACKLOG_ROW_STATE"
 }
 
 # Run one tasks-axi mutation against <home>'s backlog, capturing its first
@@ -176,7 +201,15 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path>
     FM_BACKLOG_CLOSE_REPLAY_RESULT=stale
     return 0
   fi
-  row_state=$(fm_backlog_row_state "$data" "$id" || true)
+  if fm_backlog_row_probe "$data" "$id"; then
+    row_state=$FM_BACKLOG_ROW_STATE
+  else
+    if [ "$FM_BACKLOG_ROW_RESULT" != not_found ]; then
+      FM_BACKLOG_TRANSITION_ERROR=$FM_BACKLOG_ROW_ERROR
+      return 1
+    fi
+    row_state=
+  fi
   case "$row_state" in
     done\ *|'')
       # Already closed, or the row is gone entirely: nothing is owed.
