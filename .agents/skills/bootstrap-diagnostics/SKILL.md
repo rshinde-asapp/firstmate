@@ -51,7 +51,8 @@ When any diagnostic needs captain attention, report the plain consequence and re
 - Any other `PR_CHECK_MIGRATION:` refusal means migration did not complete safely, whether because watcher exclusion, a private path, a diagnostic, quarantine validation, or marker publication could not be proved.
   Keep each affected poll unavailable, inspect the named private state path, and do not bypass the migration or execute a quarantined artifact; a completed safe-scan marker allows unrelated authenticated polls to continue while private repair remains pending.
 - `BACKLOG_RECONCILE: <id>: recorded backlog close could not be replayed: <reason>` - an interrupted cleanup recorded exactly which backlog item it still owed a close, and this session start could not land it.
-  The task's own record is already gone, so the item is showing as running when the work is finished; read the named reason, fix what is blocking the backlog file, and rerun session start so the same recorded close replays.
+  The endpoint and local copy are already gone; the task record is normally gone too, but remains paired with the marker when recovery could not remove it safely.
+  Read the named reason, fix the record or backlog-file problem, and rerun session start so the same recorded close replays.
   Never hand-close the item by deleting `state/<id>.backlog-close` - that discards the completion link the cleanup captured.
 - `BACKLOG_RECONCILE: <id>: worker record exists but its backlog item could not be moved to In flight: <reason>` - this home owns a worker whose backlog item is still queued, and the reconciliation could not correct it.
   Until it is corrected, the fleet view reads that worker as work no backlog item owns; resolve the named backlog problem and rerun session start.
