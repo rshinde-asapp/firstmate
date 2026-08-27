@@ -170,8 +170,6 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-startup-memory-budget-lib.sh"
 # shellcheck source=bin/fm-x-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-x-lib.sh"
-# shellcheck source=bin/fm-wake-lib.sh disable=SC1091
-. "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-backend.sh disable=SC1091
 . "$SCRIPT_DIR/fm-backend.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh disable=SC1091
@@ -1193,6 +1191,10 @@ crew_dispatch_validate() {
 # backstops for what this cannot see. Never reads or writes another home.
 backlog_record_reconcile() {
   local marker meta meta_lock id row label has_record=0
+  # Keep the wake/lock library's source-time state-directory creation inside
+  # this mutating sweep, so FM_BOOTSTRAP_DETECT_ONLY remains read-only.
+  # shellcheck source=bin/fm-wake-lib.sh disable=SC1091
+  . "$SCRIPT_DIR/fm-wake-lib.sh"
   # `ship` stands for "any backlog-tracked kind" in this gate: the per-record
   # loop below still skips secondmates individually.
   fm_backlog_transition_applies "$CONFIG" "$DATA" ship || return 0

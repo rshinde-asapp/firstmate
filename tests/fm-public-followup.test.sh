@@ -1141,6 +1141,10 @@ test_cleanup_refuses_while_a_public_reply_is_owed() {
   local home rc
   home=$(make_home cleanup-guard)
   seed_commitment "$home" pf-guard req-guard discord main ship-task
+  tasks_in "$home" add ship-task "ship guarded by its public follow-up" --kind ship >/dev/null \
+    || fail "could not add the guarded ship to its home's backlog"
+  tasks_in "$home" start ship-task >/dev/null \
+    || fail "could not mark the guarded ship In flight"
   fm_write_meta "$home/state/ship-task.meta" \
     "window=firstmate:fm-ship-task" \
     "worktree=$home/projects/gone" \
@@ -1966,6 +1970,10 @@ test_retention_creates_no_false_teardown_refusal() {
   local home home2 rc out registry tmp
   home=$(make_home retain-teardown)
   seed_commitment "$home" pf-retain req-retain discord main ship-retain
+  tasks_in "$home" add ship-retain "ship with a retained delivered registration" --kind ship >/dev/null \
+    || fail "could not add the retained-registration ship to its home's backlog"
+  tasks_in "$home" start ship-retain >/dev/null \
+    || fail "could not mark the retained-registration ship In flight"
   fm_write_meta "$home/state/ship-retain.meta" \
     "window=firstmate:fm-ship-retain" \
     "worktree=$home/projects/gone" \
@@ -2121,6 +2129,10 @@ test_prechange_registration_is_open_and_unrechainable() {
 test_x_request_teardown_warns_when_final_unposted() {
   local home rc
   home=$(make_home xreq-warn)
+  tasks_in "$home" add linked-task "ship with a legacy Relay request link" --kind ship >/dev/null \
+    || fail "could not add the legacy-link ship to its home's backlog"
+  tasks_in "$home" start linked-task >/dev/null \
+    || fail "could not mark the legacy-link ship In flight"
   fm_write_meta "$home/state/linked-task.meta" \
     "window=firstmate:fm-linked-task" \
     "worktree=$home/projects/gone" \
