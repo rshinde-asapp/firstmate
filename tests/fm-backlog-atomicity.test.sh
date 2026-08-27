@@ -124,6 +124,20 @@ SH
   chmod +x "$case_dir/fakebin/tasks-axi"
 }
 
+break_launch_delivery() {  # <case-dir>
+  local case_dir=$1
+  cat > "$case_dir/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "$*" in *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;; esac
+case "${1:-}" in
+  display-message) printf 'firstmate\n'; exit 0 ;;
+  send-keys) exit 1 ;;
+esac
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/tmux"
+}
+
 break_meta_removal() {  # <case-dir> <meta-path>
   local case_dir=$1 meta=$2 real
   real=$(command -v rm)
@@ -250,6 +264,24 @@ test_dispatch_leaves_no_record_when_the_transition_fails() {
   [ "$(row_state "$case_dir" "$id")" = queued ] \
     || fail "a failed dispatch left the backlog item in $(row_state "$case_dir" "$id")"
   pass "a failed backlog transition fails the dispatch loudly and leaves no record"
+}
+
+test_dispatch_rolls_back_before_a_failed_launch_delivery() {
+  local case_dir id out rc=0
+  id=atomic-dispatch-delivery-fails-b5
+  case_dir=$(make_home dispatch-delivery-fails "$id")
+  add_item "$case_dir" "$id"
+  break_launch_delivery "$case_dir"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn reported success though launch delivery failed"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "a failed launch delivery left its provisional record behind"
+  assert_absent "$(home_of "$case_dir")/state/$id.busy-state" \
+    "a failed launch delivery left its provisional busy generation behind"
+  [ "$(row_state "$case_dir" "$id")" = queued ] \
+    || fail "launch delivery failed after committing backlog state $(row_state "$case_dir" "$id")"
+  pass "dispatch commits neither record nor backlog state before launch delivery succeeds"
 }
 
 test_dispatch_does_not_resurrect_a_row_closed_after_preflight() {
@@ -582,6 +614,7 @@ test_dispatch_moves_the_item_in_flight_in_the_same_run
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_refuses_a_closed_item
 test_dispatch_leaves_no_record_when_the_transition_fails
+test_dispatch_rolls_back_before_a_failed_launch_delivery
 test_dispatch_does_not_resurrect_a_row_closed_after_preflight
 test_dispatch_fails_when_its_row_vanishes_after_preflight
 test_completion_closes_a_local_only_ship_before_reporting_success

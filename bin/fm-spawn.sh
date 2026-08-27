@@ -688,6 +688,7 @@ SPAWN_META_TMP=
 SPAWN_META_LOCK=
 SPAWN_META_LOCK_HELD=0
 SPAWN_META_PUBLISH_STARTED=0
+SPAWN_FRESH_COMMIT_PENDING=0
 SPAWN_TASK_SET_LOCK=
 SPAWN_TASK_SET_LOCK_HELD=0
 RELAUNCH_REPLACEMENT_PENDING=0
@@ -790,6 +791,13 @@ spawn_abort_cleanup() {
   if [ "$SPAWN_TASK_LOCK_HELD" = 1 ]; then
     SPAWN_TASK_LOCK_HELD=0
     fm_lock_release "$SPAWN_TASK_LOCK" || true
+  fi
+  if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ]; then
+    SPAWN_FRESH_COMMIT_PENDING=0
+    rm -f "$STATE/$ID.meta" 2>/dev/null || true
+    if [ -n "${BUSY_GEN:-}" ]; then
+      "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" >/dev/null 2>&1 || true
+    fi
   fi
   if [ "$SPAWN_META_LOCK_HELD" = 1 ]; then
     SPAWN_META_LOCK_HELD=0
@@ -2794,12 +2802,18 @@ preserve_relaunch_meta() {
     echo "control_relaunch_tx=$FM_CONTROL_RELAUNCH_TX"
   fi
 } > "$SPAWN_META_PATH"
+if [ "$RELAUNCH" -eq 0 ]; then
+  # Until every fallible delivery step has succeeded and the backlog transition
+  # commits below, an ordinary shell error must not leave this provisional
+  # record (or its paired busy generation) behind.
+  SPAWN_FRESH_COMMIT_PENDING=1
+fi
 
 # Fuse the backlog In-flight transition into the publication that just created
 # the record (bin/fm-backlog-transition-lib.sh owns the invariant). It runs under
 # this task's own meta lock, so a steer or teardown racing the same id stays
-# serialized exactly as before, and it runs before the launch below so a failure
-# is still unwindable.
+# serialized exactly as before. The call itself is deferred to the final commit
+# point below so every earlier launch-delivery failure remains unwindable.
 spawn_commit_backlog_transition() {
   local row
   [ "$BACKLOG_TRANSITION" = 1 ] || return 0
@@ -2831,33 +2845,17 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_REPLACEMENT_PENDING=0
   SPAWN_META_PUBLISH_STARTED=0
   SPAWN_META_TMP=
-  if ! spawn_commit_backlog_transition; then
-    fm_lock_release "$SPAWN_META_LOCK"
-    SPAWN_META_LOCK_HELD=0
-    echo "error: task $ID was republished but its backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); the task's record and local copy are untouched - fix the backlog and re-run the relaunch" >&2
-    exit 1
-  fi
-  fm_lock_release "$SPAWN_META_LOCK"
-  SPAWN_META_LOCK_HELD=0
-else
-  if ! spawn_commit_backlog_transition; then
-    # Remove the record this process just published, and the busy generation
-    # armed alongside it, rather than leave a worker the backlog does not own.
-    # The endpoint and local copy are named because nothing else now points at
-    # them.
-    rm -f "$STATE/$ID.meta"
-    if [ -n "${BUSY_GEN:-}" ]; then
-      "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" \
-        || echo "warning: could not retire the busy generation armed for $ID" >&2
-    fi
-    fm_lock_release "$SPAWN_META_LOCK"
-    SPAWN_META_LOCK_HELD=0
-    echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
-    exit 1
-  fi
+  # Relaunch replaces an already-owned record and preserves the established
+  # short metadata critical sections used by concurrent durable writers. The
+  # final backlog re-verification reacquires this lock below.
   fm_lock_release "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=0
 fi
+# A fresh dispatch keeps the per-task meta lock through launch delivery. The
+# backlog mutation is deliberately the final fallible commit below, so teardown
+# cannot observe or complete this provisional record between its state check
+# and `tasks-axi start`, and a delivery failure cannot follow a committed
+# In-flight transition.
 if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
   # The record is published, so this task is now part of the set a teardown
   # enumerates and locks per task. The set lock is only needed across that
@@ -2928,10 +2926,15 @@ if [ -z "$SPAWN_TRACEPARENT" ] && [ "$RELAUNCH" -eq 1 ]; then
 fi
 
 spawn_record_traceparent() {
-  local meta="$STATE/$ID.meta" tmp status=0
-  SPAWN_META_LOCK=$(fm_meta_lock_path "$meta") || return 1
-  fm_lock_acquire_wait "$SPAWN_META_LOCK"
-  SPAWN_META_LOCK_HELD=1
+  local meta="$STATE/$ID.meta" status=0 acquired=0
+  # Fresh publication still owns the lock. Relaunch deliberately uses a short
+  # independent critical section so other metadata interfaces can serialize.
+  if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
+    SPAWN_META_LOCK=$(fm_meta_lock_path "$meta") || return 1
+    fm_lock_acquire_wait "$SPAWN_META_LOCK"
+    SPAWN_META_LOCK_HELD=1
+    acquired=1
+  fi
   SPAWN_META_TMP="$STATE/.$ID.meta.trace.${BASHPID:-$$}"
   if [ ! -f "$meta" ] || [ ! -w "$meta" ] \
      || ! awk -F= '$1 != "traceparent"' "$meta" > "$SPAWN_META_TMP" \
@@ -2941,8 +2944,10 @@ spawn_record_traceparent() {
     rm -f "$SPAWN_META_TMP" 2>/dev/null || true
   fi
   SPAWN_META_TMP=
-  fm_lock_release "$SPAWN_META_LOCK" || status=1
-  SPAWN_META_LOCK_HELD=0
+  if [ "$acquired" = 1 ]; then
+    fm_lock_release "$SPAWN_META_LOCK" || status=1
+    SPAWN_META_LOCK_HELD=0
+  fi
   return "$status"
 }
 
@@ -3008,6 +3013,34 @@ if [ "$KIND" = secondmate ] && [ "${FM_SKIP_SECONDMATE_INHERIT:-0}" != 1 ]; then
     fi
   fi
 fi
+
+# This is the commit point: all endpoint and harness delivery that can reject
+# the spawn has succeeded. Re-read and transition while holding the same
+# per-task lock as metadata publication, then and only then report success.
+if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
+  SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
+  fm_lock_acquire_wait "$SPAWN_META_LOCK"
+  SPAWN_META_LOCK_HELD=1
+fi
+if ! spawn_commit_backlog_transition; then
+  if [ "$RELAUNCH" -eq 0 ]; then
+    rm -f "$STATE/$ID.meta"
+    SPAWN_FRESH_COMMIT_PENDING=0
+    if [ -n "${BUSY_GEN:-}" ]; then
+      "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" \
+        || echo "warning: could not retire the busy generation armed for $ID" >&2
+    fi
+    echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
+  else
+    echo "error: task $ID was republished but its backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); fix the backlog and re-run the relaunch" >&2
+  fi
+  fm_lock_release "$SPAWN_META_LOCK"
+  SPAWN_META_LOCK_HELD=0
+  exit 1
+fi
+SPAWN_FRESH_COMMIT_PENDING=0
+fm_lock_release "$SPAWN_META_LOCK"
+SPAWN_META_LOCK_HELD=0
 
 SPAWN_DELIVERY=
 [ -z "$MODE" ] || SPAWN_DELIVERY=" mode=$MODE yolo=$YOLO"
