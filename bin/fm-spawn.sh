@@ -2947,6 +2947,13 @@ spawn_record_traceparent() {
   return "$status"
 }
 
+# Once launch delivery can start the worker, defer catchable interruption until
+# the paired backlog state is committed. Otherwise a signal after Enter but
+# before tasks-axi could leave a running worker whose provisional record EXIT
+# cleanup removes. Commands run directly by this shell inherit the ignored
+# dispositions; explicit delivery failures still exit through ordinary cleanup.
+trap '' HUP INT TERM
+
 # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
@@ -3018,12 +3025,17 @@ if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   fm_lock_acquire_wait "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=1
 fi
-# From this point a process-level interruption must preserve the published
-# record: it is the durable recovery evidence when interruption lands inside
-# the backlog mutation. An ordinary returned transition failure still performs
-# the complete record and busy-generation unwind below.
-SPAWN_FRESH_COMMIT_PENDING=0
-if ! spawn_commit_backlog_transition; then
+# Complete the uninterruptible catchable-signal region begun before launch
+# delivery. Clearing the provisional flag before tasks-axi could preserve a
+# queued record; clearing it after tasks-axi could let EXIT cleanup delete an
+# In-flight record. Keeping signals ignored across both operations closes both
+# races. An uncatchable crash still leaves the published record for bootstrap
+# recovery.
+SPAWN_BACKLOG_COMMIT_STATUS=0
+if spawn_commit_backlog_transition; then
+  SPAWN_FRESH_COMMIT_PENDING=0
+else
+  SPAWN_BACKLOG_COMMIT_STATUS=$?
   if [ "$RELAUNCH" -eq 0 ]; then
     rm -f "$STATE/$ID.meta"
     SPAWN_FRESH_COMMIT_PENDING=0
@@ -3035,9 +3047,12 @@ if ! spawn_commit_backlog_transition; then
   else
     echo "error: task $ID was republished but its backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); fix the backlog and re-run the relaunch" >&2
   fi
+fi
+trap - HUP INT TERM
+if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   fm_lock_release "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=0
-  exit 1
+  exit "$SPAWN_BACKLOG_COMMIT_STATUS"
 fi
 fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0

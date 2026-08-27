@@ -105,17 +105,23 @@ SH
   chmod +x "$case_dir/fakebin/tasks-axi"
 }
 
-interrupt_spawn_after_start_commit() {  # <case-dir>
-  local case_dir=$1 real
+interrupt_spawn_during_start() {  # <case-dir> <before|after>
+  local case_dir=$1 timing=$2 real
   real=$(command -v tasks-axi)
   cat > "$case_dir/fakebin/tasks-axi" <<SH
 #!/usr/bin/env bash
 if [ "\${1:-}" = start ]; then
-  "$real" "\$@" || exit \$?
   spawn_pid=\$(ps -o ppid= -p "\$PPID" | tr -d ' ')
   case "\$spawn_pid" in ''|*[!0-9]*) exit 1 ;; esac
-  kill -TERM "\$spawn_pid"
-  /bin/sleep 1
+  if [ "$timing" = before ]; then
+    kill -TERM "\$spawn_pid"
+    /bin/sleep 0.1
+  fi
+  "$real" "\$@" || exit \$?
+  if [ "$timing" = after ]; then
+    kill -TERM "\$spawn_pid"
+    /bin/sleep 0.1
+  fi
   exit 0
 fi
 exec "$real" "\$@"
@@ -302,20 +308,22 @@ test_dispatch_rolls_back_before_a_failed_launch_delivery() {
   pass "dispatch commits neither record nor backlog state before launch delivery succeeds"
 }
 
-test_dispatch_interruption_after_backlog_commit_preserves_recovery_record() {
-  local case_dir id out rc=0
-  id=atomic-dispatch-interrupted-b5
-  case_dir=$(make_home dispatch-interrupted "$id")
-  add_item "$case_dir" "$id"
-  interrupt_spawn_after_start_commit "$case_dir"
+test_dispatch_defers_interruption_across_backlog_commit() {
+  local timing case_dir id out
+  for timing in before after; do
+    id="atomic-dispatch-interrupted-$timing-b5"
+    case_dir=$(make_home "dispatch-interrupted-$timing" "$id")
+    add_item "$case_dir" "$id"
+    interrupt_spawn_during_start "$case_dir" "$timing"
 
-  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
-  [ "$rc" -ne 0 ] || fail "interrupted spawn unexpectedly reported success"
-  [ "$(row_state "$case_dir" "$id")" = in_flight ] \
-    || fail "the injected interruption did not land after the backlog commit"
-  assert_present "$(home_of "$case_dir")/state/$id.meta" \
-    "an interruption after backlog commit deleted the paired recovery record"
-  pass "dispatch preserves its published recovery record when interrupted after backlog commit"
+    out=$(run_ship_spawn "$case_dir" "$id") \
+      || fail "a $timing-commit interruption stopped the atomic dispatch: $out"
+    [ "$(row_state "$case_dir" "$id")" = in_flight ] \
+      || fail "a $timing-commit interruption left the backlog row queued"
+    assert_present "$(home_of "$case_dir")/state/$id.meta" \
+      "a $timing-commit interruption removed the paired task record"
+  done
+  pass "dispatch defers catchable interruption across both halves of its backlog commit"
 }
 
 test_dispatch_does_not_resurrect_a_row_closed_after_preflight() {
@@ -649,7 +657,7 @@ test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_refuses_a_closed_item
 test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_rolls_back_before_a_failed_launch_delivery
-test_dispatch_interruption_after_backlog_commit_preserves_recovery_record
+test_dispatch_defers_interruption_across_backlog_commit
 test_dispatch_does_not_resurrect_a_row_closed_after_preflight
 test_dispatch_fails_when_its_row_vanishes_after_preflight
 test_completion_closes_a_local_only_ship_before_reporting_success
