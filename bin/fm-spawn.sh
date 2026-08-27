@@ -2729,10 +2729,10 @@ META_WINDOW=$T
 [ "$BACKEND" = orca ] && META_WINDOW=$W
 SPAWN_GEN="s$(date +%s).${BASHPID:-$$}.$RANDOM"
 SPAWN_META_PATH="$STATE/$ID.meta"
+SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
+fm_lock_acquire_wait "$SPAWN_META_LOCK"
+SPAWN_META_LOCK_HELD=1
 if [ "$RELAUNCH" -eq 1 ]; then
-  SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
-  fm_lock_acquire_wait "$SPAWN_META_LOCK"
-  SPAWN_META_LOCK_HELD=1
   SPAWN_META_TMP="$STATE/.$ID.meta.relaunch.${BASHPID:-$$}"
   SPAWN_META_PATH=$SPAWN_META_TMP
 fi
@@ -2828,31 +2828,23 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fm_lock_release "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=0
 else
-  # The fresh path published the record under the task-set lock; take this task's
-  # own meta lock for the paired backlog transition, matching every other
-  # single-record mutation in this file.
-  if [ "$BACKLOG_TRANSITION" = 1 ]; then
-    SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
-    fm_lock_acquire_wait "$SPAWN_META_LOCK"
-    SPAWN_META_LOCK_HELD=1
-    if ! spawn_commit_backlog_transition; then
-      # Remove the record this process just published, and the busy generation
-      # armed alongside it, rather than leave a worker the backlog does not own.
-      # The endpoint and local copy are named because nothing else now points at
-      # them.
-      rm -f "$STATE/$ID.meta"
-      if [ -n "${BUSY_GEN:-}" ]; then
-        "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" \
-          || echo "warning: could not retire the busy generation armed for $ID" >&2
-      fi
-      fm_lock_release "$SPAWN_META_LOCK"
-      SPAWN_META_LOCK_HELD=0
-      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
-      exit 1
+  if ! spawn_commit_backlog_transition; then
+    # Remove the record this process just published, and the busy generation
+    # armed alongside it, rather than leave a worker the backlog does not own.
+    # The endpoint and local copy are named because nothing else now points at
+    # them.
+    rm -f "$STATE/$ID.meta"
+    if [ -n "${BUSY_GEN:-}" ]; then
+      "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" \
+        || echo "warning: could not retire the busy generation armed for $ID" >&2
     fi
     fm_lock_release "$SPAWN_META_LOCK"
     SPAWN_META_LOCK_HELD=0
+    echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
+    exit 1
   fi
+  fm_lock_release "$SPAWN_META_LOCK"
+  SPAWN_META_LOCK_HELD=0
 fi
 if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
   # The record is published, so this task is now part of the set a teardown

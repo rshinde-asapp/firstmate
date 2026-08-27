@@ -170,6 +170,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-startup-memory-budget-lib.sh"
 # shellcheck source=bin/fm-x-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-x-lib.sh"
+# shellcheck source=bin/fm-wake-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-backend.sh disable=SC1091
 . "$SCRIPT_DIR/fm-backend.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh disable=SC1091
@@ -1190,7 +1192,7 @@ crew_dispatch_validate() {
 # snapshot's classifier and bin/fm-secondmate-reconcile.sh's nudge stay as
 # backstops for what this cannot see. Never reads or writes another home.
 backlog_record_reconcile() {
-  local marker meta id row in_flight_ids label has_record=0
+  local marker meta meta_lock id row label has_record=0
   # `ship` stands for "any backlog-tracked kind" in this gate: the per-record
   # loop below still skips secondmates individually.
   fm_backlog_transition_applies "$CONFIG" "$DATA" ship || return 0
@@ -1199,44 +1201,45 @@ backlog_record_reconcile() {
   for marker in "$STATE"/*.backlog-close; do
     [ -e "$marker" ] || continue
     label=$(basename "$marker" .backlog-close)
+    meta_lock=$(fm_meta_lock_path "$STATE/$label.meta") || continue
+    fm_lock_try_acquire "$meta_lock" || continue
     if fm_backlog_close_marker_replay "$STATE" "$marker"; then
-      [ "$FM_BACKLOG_CLOSE_REPLAY_RESULT" = closed ] || continue
-      echo "BOOTSTRAP_INFO: closed the backlog item for $label that an interrupted cleanup left open"
+      if [ "$FM_BACKLOG_CLOSE_REPLAY_RESULT" = closed ]; then
+        echo "BOOTSTRAP_INFO: closed the backlog item for $label that an interrupted cleanup left open"
+      fi
     else
       echo "BACKLOG_RECONCILE: $label: recorded backlog close could not be replayed: $FM_BACKLOG_TRANSITION_ERROR"
     fi
+    fm_lock_release "$meta_lock"
   done
 
   # A home that owns no records has nothing to pair, so it never pays for a
-  # backlog read. One list read then answers the healthy case for every record
-  # at once, and only a record whose row is NOT already in flight costs a
-  # second lookup.
+  # backlog read.
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
     has_record=1
     break
   done
   [ "$has_record" = 1 ] || return 0
-  in_flight_ids=$(cd "$(fm_backlog_root "$DATA")" 2>/dev/null &&
-    tasks-axi list --state in_flight --file "$(fm_backlog_file "$DATA")" 2>/dev/null |
-    sed -n 's/^  \([^,]*\),.*/\1/p') || in_flight_ids=
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
     id=$(basename "$meta" .meta)
-    case "$in_flight_ids" in
-      "$id"|"$id"$'\n'*|*$'\n'"$id"|*$'\n'"$id"$'\n'*) continue ;;
-    esac
-    [ "$(fm_meta_get "$meta" kind)" = secondmate ] && continue
-    row=$(fm_backlog_row_state "$DATA" "$id" || true)
-    # Heal only the unambiguous case: a queued row for a record this home
-    # already owns. A held row is the captain's to move, and a closed row is a
-    # contradiction this sweep must not resolve by resurrecting the item.
-    [ "$row" = "queued no" ] || continue
-    if fm_backlog_start "$DATA" "$id"; then
-      echo "BOOTSTRAP_INFO: marked $id in flight to match the worker this home already owns"
-    else
-      echo "BACKLOG_RECONCILE: $id: worker record exists but its backlog item could not be moved to In flight: $FM_BACKLOG_TRANSITION_ERROR"
+    meta_lock=$(fm_meta_lock_path "$meta") || continue
+    fm_lock_try_acquire "$meta_lock" || continue
+    if [ -e "$meta" ] && [ "$(fm_meta_get "$meta" kind)" != secondmate ]; then
+      row=$(fm_backlog_row_state "$DATA" "$id" || true)
+      # Heal only the unambiguous case: a queued row for a record this home
+      # already owns. A held row is the captain's to move, and a closed row is a
+      # contradiction this sweep must not resolve by resurrecting the item.
+      if [ "$row" = "queued no" ]; then
+        if fm_backlog_start "$DATA" "$id"; then
+          echo "BOOTSTRAP_INFO: marked $id in flight to match the worker this home already owns"
+        else
+          echo "BACKLOG_RECONCILE: $id: worker record exists but its backlog item could not be moved to In flight: $FM_BACKLOG_TRANSITION_ERROR"
+        fi
+      fi
     fi
+    fm_lock_release "$meta_lock"
   done
 }
 

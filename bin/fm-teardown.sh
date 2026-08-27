@@ -1152,9 +1152,13 @@ work_is_landed() {
 # other ship carries the PR recorded on its own record.
 BACKLOG_DONE_ARGS=()
 backlog_done_args() {
+  local data_relative
   BACKLOG_DONE_ARGS=()
   case "$KIND" in
-    scout) BACKLOG_DONE_ARGS=(--report "data/$ID/report.md") ;;
+    scout)
+      data_relative=$(fm_backlog_data_relative "$DATA") || return 1
+      BACKLOG_DONE_ARGS=(--report "$data_relative/$ID/report.md")
+      ;;
     *)
       if [ "$MODE" = local-only ]; then
         BACKLOG_DONE_ARGS=(--note "local main")
@@ -2841,7 +2845,8 @@ BACKLOG_SKIP_REASON=
 if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
   BACKLOG_CLOSED=1
   backlog_done_args
-  fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" \
+  META_SPAWN_GEN=$(fm_meta_get "$META" spawn_gen)
+  fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
     "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}" \
     || { echo "error: the pending backlog close for $ID could not be recorded; retaining every durable task record" >&2; exit 1; }
 else

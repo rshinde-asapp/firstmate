@@ -341,23 +341,67 @@ test_recovery_preserves_a_close_when_the_backlog_cannot_be_read() {
   pass "session start preserves a pending close across a transient backlog read failure"
 }
 
-test_recovery_drops_a_recorded_close_whose_task_is_still_owned() {
+test_recovery_finishes_a_close_for_the_same_meta_incarnation() {
   local case_dir id out
-  id=atomic-heal-b10
-  case_dir=$(make_home heal-stale-close)
+  id=atomic-heal-same-incarnation-b11
+  case_dir=$(make_home heal-same-incarnation)
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
-  write_task_meta "$case_dir" "$id" ship no-mistakes
+  write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-one"
+  printf 'id=%s\ndata=%s\nspawn_gen=spawn-one\narg=--note\narg=local main\n' \
+    "$id" "$(home_of "$case_dir")/data" \
+    > "$(home_of "$case_dir")/state/$id.backlog-close"
+
+  out=$(run_bootstrap "$case_dir")
+  [ "$(row_state "$case_dir" "$id")" = "done" ] \
+    || fail "session start did not close the interrupted incarnation: $out"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "session start retained the interrupted incarnation's meta"
+  assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "session start retained the completed incarnation's close marker"
+  pass "session start finishes a close for the matching meta incarnation"
+}
+
+test_recovery_drops_a_close_for_a_newer_meta_incarnation() {
+  local case_dir id out
+  id=atomic-heal-new-incarnation-b12
+  case_dir=$(make_home heal-new-incarnation)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-two"
+  printf 'id=%s\ndata=%s\nspawn_gen=spawn-one\narg=--note\narg=local main\n' \
+    "$id" "$(home_of "$case_dir")/data" \
+    > "$(home_of "$case_dir")/state/$id.backlog-close"
+
+  out=$(run_bootstrap "$case_dir")
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] \
+    || fail "session start closed the newer task incarnation: $out"
+  assert_present "$(home_of "$case_dir")/state/$id.meta" \
+    "session start removed the newer task incarnation's meta"
+  assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "a stale recorded close was left to fire on a later restart"
+  pass "session start drops a close recorded for an older meta incarnation"
+}
+
+test_recovery_drops_a_legacy_close_when_meta_exists() {
+  local case_dir id out
+  id=atomic-heal-legacy-close-b13
+  case_dir=$(make_home heal-legacy-close)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-two"
   printf 'id=%s\ndata=%s\narg=--note\narg=local main\n' \
     "$id" "$(home_of "$case_dir")/data" \
     > "$(home_of "$case_dir")/state/$id.backlog-close"
 
   out=$(run_bootstrap "$case_dir")
   [ "$(row_state "$case_dir" "$id")" = in_flight ] \
-    || fail "session start closed an item whose worker this home still owns: $out"
+    || fail "session start guessed that a legacy close belonged to the current meta: $out"
+  assert_present "$(home_of "$case_dir")/state/$id.meta" \
+    "session start removed meta for an unversioned legacy close"
   assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
-    "a stale recorded close was left to fire on a later restart"
-  pass "session start drops a recorded close whose task the home still owns"
+    "session start retained a legacy close that could not be matched safely"
+  pass "session start treats an unversioned close as stale when meta exists"
 }
 
 test_recovery_leaves_a_captain_held_item_alone() {
@@ -446,7 +490,9 @@ test_completion_fails_loudly_and_records_the_close_it_still_owes
 test_recovery_marks_an_owned_record_in_flight
 test_recovery_replays_a_close_an_interrupted_cleanup_left_open
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read
-test_recovery_drops_a_recorded_close_whose_task_is_still_owned
+test_recovery_finishes_a_close_for_the_same_meta_incarnation
+test_recovery_drops_a_close_for_a_newer_meta_incarnation
+test_recovery_drops_a_legacy_close_when_meta_exists
 test_recovery_leaves_a_captain_held_item_alone
 test_manual_backend_home_dispatches_and_completes_without_touching_the_backlog
 test_a_secondmate_home_keeps_its_own_books

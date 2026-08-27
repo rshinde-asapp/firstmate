@@ -63,6 +63,15 @@ fm_backlog_root() {  # <data-dir>
   printf '%s\n' "$parent"
 }
 
+fm_backlog_data_relative() {  # <data-dir>
+  local data=${1%/} root
+  root=$(fm_backlog_root "$data") || return 1
+  case "$data" in
+    "$root"/*) printf '%s\n' "${data#"$root"/}" ;;
+    *) printf '%s\n' "$data" ;;
+  esac
+}
+
 fm_backlog_transition_applies() {  # <config-dir> <data-dir> <kind>
   local config=$1 data=$2 kind=$3 file
   FM_BACKLOG_TRANSITION_SKIP=
@@ -151,14 +160,15 @@ fm_backlog_close_marker_path() {  # <state-dir> <id>
 
 # Record the exact close a teardown is about to perform. Refuses an argument
 # carrying a newline rather than writing a record that cannot be read back.
-fm_backlog_close_marker_write() {  # <state-dir> <id> <data-dir> [flag...]
-  local state=$1 id=$2 data=$3 marker tmp arg
-  shift 3
+fm_backlog_close_marker_write() {  # <state-dir> <id> <data-dir> <spawn-gen> [flag...]
+  local state=$1 id=$2 data=$3 spawn_gen=$4 marker tmp arg
+  shift 4
   marker=$(fm_backlog_close_marker_path "$state" "$id") || return 1
   tmp="$state/.$id.backlog-close.${BASHPID:-$$}"
   {
     printf 'id=%s\n' "$id"
     printf 'data=%s\n' "$data"
+    printf 'spawn_gen=%s\n' "$spawn_gen"
     for arg in "$@"; do
       case "$arg" in
         *$'\n'*) return 1 ;;
@@ -177,7 +187,7 @@ fm_backlog_close_marker_clear() {  # <state-dir> <id>
 # Replay one recorded close. Returns 0 when the row is closed (or the record is
 # no longer actionable), 1 when the close itself failed.
 fm_backlog_close_marker_replay() {  # <state-dir> <marker-path>
-  local state=$1 marker=$2 id='' data='' line row_state
+  local state=$1 marker=$2 id='' data='' marker_spawn_gen='' meta_spawn_gen line row_state
   local args=()
   FM_BACKLOG_CLOSE_REPLAY_RESULT=noop
   [ -f "$marker" ] || return 0
@@ -185,6 +195,7 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path>
     case "$line" in
       id=*) id=${line#id=} ;;
       data=*) data=${line#data=} ;;
+      spawn_gen=*) marker_spawn_gen=${line#spawn_gen=} ;;
       arg=*) args+=("${line#arg=}") ;;
     esac
   done < "$marker"
@@ -192,14 +203,14 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path>
     FM_BACKLOG_TRANSITION_ERROR="unreadable pending-close record $marker"
     return 1
   fi
-  # A record still on disk means the teardown never reached its point of no
-  # return, or the id has since been dispatched again. Either way the task is
-  # owned and In flight is the correct row state, so drop the stale intent
-  # rather than closing a row whose worker still exists.
   if [ -e "$state/$id.meta" ]; then
-    rm -f "$marker" 2>/dev/null || true
-    FM_BACKLOG_CLOSE_REPLAY_RESULT=stale
-    return 0
+    meta_spawn_gen=$(sed -n 's/^spawn_gen=//p' "$state/$id.meta" | head -1)
+    if [ -z "$marker_spawn_gen" ] || [ "$meta_spawn_gen" != "$marker_spawn_gen" ]; then
+      rm -f "$marker" 2>/dev/null || true
+      FM_BACKLOG_CLOSE_REPLAY_RESULT=stale
+      return 0
+    fi
+    rm -f "$state/$id.meta"
   fi
   if fm_backlog_row_probe "$data" "$id"; then
     row_state=$FM_BACKLOG_ROW_STATE
