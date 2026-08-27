@@ -2845,17 +2845,13 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_REPLACEMENT_PENDING=0
   SPAWN_META_PUBLISH_STARTED=0
   SPAWN_META_TMP=
-  # Relaunch replaces an already-owned record and preserves the established
-  # short metadata critical sections used by concurrent durable writers. The
-  # final backlog re-verification reacquires this lock below.
-  fm_lock_release "$SPAWN_META_LOCK"
-  SPAWN_META_LOCK_HELD=0
 fi
-# A fresh dispatch keeps the per-task meta lock through launch delivery. The
-# backlog mutation is deliberately the final fallible commit below, so teardown
-# cannot observe or complete this provisional record between its state check
-# and `tasks-axi start`, and a delivery failure cannot follow a committed
-# In-flight transition.
+# A dispatch or relaunch keeps the per-task meta lock through launch delivery.
+# The backlog mutation is deliberately the final fallible commit below, so
+# teardown cannot remove a relaunched record while its replacement worker is
+# still being delivered, cannot observe or complete a fresh provisional record
+# between its state check and `tasks-axi start`, and a delivery failure cannot
+# follow a committed In-flight transition.
 if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
   # The record is published, so this task is now part of the set a teardown
   # enumerates and locks per task. The set lock is only needed across that
@@ -3022,6 +3018,11 @@ if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   fm_lock_acquire_wait "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=1
 fi
+# From this point a process-level interruption must preserve the published
+# record: it is the durable recovery evidence when interruption lands inside
+# the backlog mutation. An ordinary returned transition failure still performs
+# the complete record and busy-generation unwind below.
+SPAWN_FRESH_COMMIT_PENDING=0
 if ! spawn_commit_backlog_transition; then
   if [ "$RELAUNCH" -eq 0 ]; then
     rm -f "$STATE/$ID.meta"
@@ -3038,7 +3039,6 @@ if ! spawn_commit_backlog_transition; then
   SPAWN_META_LOCK_HELD=0
   exit 1
 fi
-SPAWN_FRESH_COMMIT_PENDING=0
 fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0
 
