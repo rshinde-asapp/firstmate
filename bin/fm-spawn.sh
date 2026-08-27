@@ -2806,11 +2806,23 @@ spawn_commit_backlog_transition() {
   # Re-verify rather than assume. A relaunch republishes a record whose row is
   # normally already In flight, and blindly re-running the transition on a row
   # tasks-axi has since closed would silently resurrect it.
-  row=$(fm_backlog_row_state "$DATA" "$ID" || true)
+  if ! fm_backlog_row_probe "$DATA" "$ID"; then
+    if [ "$FM_BACKLOG_ROW_RESULT" = not_found ]; then
+      FM_BACKLOG_TRANSITION_ERROR="backlog item $ID vanished before dispatch commit"
+    else
+      FM_BACKLOG_TRANSITION_ERROR=$FM_BACKLOG_ROW_ERROR
+    fi
+    return 1
+  fi
+  row=$FM_BACKLOG_ROW_STATE
   case "$row" in
     in_flight\ *) return 0 ;;
+    queued\ no) fm_backlog_start "$DATA" "$ID" ;;
+    *)
+      FM_BACKLOG_TRANSITION_ERROR="backlog item $ID is not dispatchable in state $row"
+      return 1
+      ;;
   esac
-  fm_backlog_start "$DATA" "$ID"
 }
 
 if [ "$RELAUNCH" -eq 1 ]; then

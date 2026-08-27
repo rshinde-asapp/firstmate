@@ -210,7 +210,10 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path>
       FM_BACKLOG_CLOSE_REPLAY_RESULT=stale
       return 0
     fi
-    rm -f "$state/$id.meta"
+    if ! rm -f "$state/$id.meta" || [ -e "$state/$id.meta" ]; then
+      FM_BACKLOG_TRANSITION_ERROR="could not remove the interrupted task record $state/$id.meta"
+      return 1
+    fi
   fi
   if fm_backlog_row_probe "$data" "$id"; then
     row_state=$FM_BACKLOG_ROW_STATE

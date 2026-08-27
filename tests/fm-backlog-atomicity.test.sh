@@ -105,6 +105,38 @@ SH
   chmod +x "$case_dir/fakebin/tasks-axi"
 }
 
+change_row_on_second_show() {  # <case-dir> <done|rm>
+  local case_dir=$1 action=$2 real
+  real=$(command -v tasks-axi)
+  cat > "$case_dir/fakebin/tasks-axi" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = show ]; then
+  count=0
+  [ ! -f "$case_dir/show-count" ] || count=\$(cat "$case_dir/show-count")
+  count=\$((count + 1))
+  printf '%s\n' "\$count" > "$case_dir/show-count"
+  if [ "\$count" -eq 2 ]; then
+    "$real" "$action" "\$2" --file "\$4" >/dev/null || exit 1
+  fi
+fi
+exec "$real" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/tasks-axi"
+}
+
+break_meta_removal() {  # <case-dir> <meta-path>
+  local case_dir=$1 meta=$2 real
+  real=$(command -v rm)
+  cat > "$case_dir/fakebin/rm" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  [ "\$arg" != "$meta" ] || exit 1
+done
+exec "$real" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/rm"
+}
+
 write_task_meta() {  # <case-dir> <id> <kind> <mode> [extra-line...]
   local case_dir=$1 id=$2 kind=$3 mode=$4
   shift 4
@@ -218,6 +250,40 @@ test_dispatch_leaves_no_record_when_the_transition_fails() {
   [ "$(row_state "$case_dir" "$id")" = queued ] \
     || fail "a failed dispatch left the backlog item in $(row_state "$case_dir" "$id")"
   pass "a failed backlog transition fails the dispatch loudly and leaves no record"
+}
+
+test_dispatch_does_not_resurrect_a_row_closed_after_preflight() {
+  local case_dir id out rc=0
+  id=atomic-dispatch-closed-race-b5
+  case_dir=$(make_home dispatch-closed-race "$id")
+  add_item "$case_dir" "$id"
+  change_row_on_second_show "$case_dir" "done"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn succeeded after its backlog row was closed"
+  assert_contains "$out" "state done" "spawn did not report the row's ineligible state"
+  [ "$(row_state "$case_dir" "$id")" = "done" ] \
+    || fail "spawn resurrected a row closed after preflight"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "spawn retained a record after its row was closed"
+  pass "dispatch does not resurrect a row closed after preflight"
+}
+
+test_dispatch_fails_when_its_row_vanishes_after_preflight() {
+  local case_dir id out rc=0
+  id=atomic-dispatch-removed-race-b6
+  case_dir=$(make_home dispatch-removed-race "$id")
+  add_item "$case_dir" "$id"
+  change_row_on_second_show "$case_dir" rm
+
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn succeeded after its backlog row vanished"
+  assert_contains "$out" "vanished before dispatch commit" \
+    "spawn did not report that its backlog row vanished"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "spawn retained a record after its backlog row vanished"
+  [ -z "$(row_state "$case_dir" "$id")" ] || fail "spawn recreated a removed backlog row"
+  pass "dispatch fails when its backlog row vanishes after preflight"
 }
 
 # --- completion -------------------------------------------------------------
@@ -362,6 +428,38 @@ test_recovery_finishes_a_close_for_the_same_meta_incarnation() {
   pass "session start finishes a close for the matching meta incarnation"
 }
 
+test_recovery_preserves_both_records_when_meta_removal_fails() {
+  local case_dir id meta out
+  id=atomic-heal-remove-failure-b12
+  case_dir=$(make_home heal-remove-failure)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  meta="$(home_of "$case_dir")/state/$id.meta"
+  write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-one"
+  printf 'id=%s\ndata=%s\nspawn_gen=spawn-one\narg=--note\narg=local main\n' \
+    "$id" "$(home_of "$case_dir")/data" \
+    > "$(home_of "$case_dir")/state/$id.backlog-close"
+  break_meta_removal "$case_dir" "$meta"
+
+  out=$(run_bootstrap "$case_dir")
+  assert_contains "$out" "could not remove the interrupted task record" \
+    "session start did not surface the record-removal failure"
+  assert_present "$meta" "failed recovery removed the task record"
+  assert_present "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "failed recovery discarded the pending close"
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] \
+    || fail "failed recovery closed the backlog before removing meta"
+
+  rm -f "$case_dir/fakebin/rm"
+  out=$(run_bootstrap "$case_dir")
+  [ "$(row_state "$case_dir" "$id")" = "done" ] \
+    || fail "recovery did not retry after meta removal recovered: $out"
+  assert_absent "$meta" "successful retry retained the task record"
+  assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "successful retry retained the pending close"
+  pass "recovery preserves both records when meta removal fails"
+}
+
 test_recovery_drops_a_close_for_a_newer_meta_incarnation() {
   local case_dir id out
   id=atomic-heal-new-incarnation-b12
@@ -484,6 +582,8 @@ test_dispatch_moves_the_item_in_flight_in_the_same_run
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_refuses_a_closed_item
 test_dispatch_leaves_no_record_when_the_transition_fails
+test_dispatch_does_not_resurrect_a_row_closed_after_preflight
+test_dispatch_fails_when_its_row_vanishes_after_preflight
 test_completion_closes_a_local_only_ship_before_reporting_success
 test_completion_closes_a_scout_with_its_report
 test_completion_fails_loudly_and_records_the_close_it_still_owes
@@ -491,6 +591,7 @@ test_recovery_marks_an_owned_record_in_flight
 test_recovery_replays_a_close_an_interrupted_cleanup_left_open
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read
 test_recovery_finishes_a_close_for_the_same_meta_incarnation
+test_recovery_preserves_both_records_when_meta_removal_fails
 test_recovery_drops_a_close_for_a_newer_meta_incarnation
 test_recovery_drops_a_legacy_close_when_meta_exists
 test_recovery_leaves_a_captain_held_item_alone
