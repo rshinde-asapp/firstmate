@@ -700,22 +700,13 @@ CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 
 spawn_fresh_commit_rollback() {
-  local failed=0
-  if ! rm -f "$STATE/$ID.meta" 2>/dev/null \
-     || [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; then
-    echo "error: could not remove provisional task record $STATE/$ID.meta after failed dispatch" >&2
-    failed=1
-  fi
-  if [ -n "${BUSY_GEN:-}" ]; then
-    if ! "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" >/dev/null 2>&1; then
-      echo "warning: could not retire the busy generation armed for $ID" >&2
-      failed=1
-    fi
-  fi
-  if [ "$failed" = 0 ]; then
+  if fm_backlog_atomic_transition rollback "$STATE/$ID.meta" \
+      "$FM_ROOT/bin/fm-busy-event.sh" "$STATE" "$ID" "${BUSY_GEN:-}"; then
     SPAWN_FRESH_COMMIT_PENDING=0
+    return 0
   fi
-  return "$failed"
+  echo "error: $FM_BACKLOG_TRANSITION_ERROR" >&2
+  return 1
 }
 
 parse_orca_worktree_result() {
@@ -788,6 +779,7 @@ spawn_abort_cleanup() {
       if ! fm_backend_remove_worktree orca "$ORCA_WORKTREE_ID" 2>/dev/null; then
         mkdir -p "$STATE" 2>/dev/null || true
         if [ -d "$STATE" ]; then
+          SPAWN_META_TMP="$STATE/.$ID.meta.orca-recovery.${BASHPID:-$$}"
           {
             echo "window=$W"
             echo "worktree=${WT:-}"
@@ -802,7 +794,9 @@ spawn_abort_cleanup() {
             echo "backend=orca"
             echo "orca_worktree_id=$ORCA_WORKTREE_ID"
             [ -z "${ORCA_TERMINAL:-}" ] || echo "terminal=$ORCA_TERMINAL"
-          } > "$STATE/$ID.meta" 2>/dev/null || true
+          } > "$SPAWN_META_TMP" 2>/dev/null \
+            && fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record" \
+            || true
         fi
       fi
     fi
@@ -2763,8 +2757,11 @@ fm_lock_acquire_wait "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=1
 if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_META_TMP="$STATE/.$ID.meta.relaunch.${BASHPID:-$$}"
-  SPAWN_META_PATH=$SPAWN_META_TMP
+else
+  SPAWN_META_TMP="$STATE/.$ID.meta.spawn.${BASHPID:-$$}"
+  SPAWN_FRESH_COMMIT_PENDING=1
 fi
+SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
@@ -2822,12 +2819,16 @@ preserve_relaunch_meta() {
   if [ "$SPAWN_CONTROL_PARENT" = 1 ] && [ -n "${FM_CONTROL_RELAUNCH_TX:-}" ]; then
     echo "control_relaunch_tx=$FM_CONTROL_RELAUNCH_TX"
   fi
-} > "$SPAWN_META_PATH"
+} > "$SPAWN_META_PATH" || {
+  echo "error: task record for $ID could not be prepared at $SPAWN_META_PATH" >&2
+  exit 1
+}
 if [ "$RELAUNCH" -eq 0 ]; then
-  # Until every fallible delivery step has succeeded and the backlog transition
-  # commits below, an ordinary shell error must not leave this provisional
-  # record (or its paired busy generation) behind.
-  SPAWN_FRESH_COMMIT_PENDING=1
+  if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record"; then
+    echo "error: task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+    exit 1
+  fi
+  SPAWN_META_TMP=
 fi
 
 # Fuse the backlog In-flight transition into the publication that just created
@@ -2836,35 +2837,16 @@ fi
 # serialized exactly as before. The call itself is deferred to the final commit
 # point below so every earlier launch-delivery failure remains unwindable.
 spawn_commit_backlog_transition() {
-  local row row_status
   [ "$BACKLOG_TRANSITION" = 1 ] || return 0
-  # Re-verify rather than assume. A relaunch republishes a record whose row is
-  # normally already In flight, and blindly re-running the transition on a row
-  # tasks-axi has since closed would silently resurrect it.
-  fm_backlog_row_probe "$DATA" "$ID"
-  row_status=$?
-  if [ "$row_status" -ne 0 ]; then
-    if [ "$FM_BACKLOG_ROW_RESULT" = not_found ]; then
-      FM_BACKLOG_TRANSITION_ERROR="backlog item $ID vanished before dispatch commit"
-    else
-      FM_BACKLOG_TRANSITION_ERROR=$FM_BACKLOG_ROW_ERROR
-    fi
-    return "$row_status"
-  fi
-  row=$FM_BACKLOG_ROW_STATE
-  case "$row" in
-    in_flight\ *) return 0 ;;
-    queued\ no) fm_backlog_start "$DATA" "$ID" ;;
-    *)
-      FM_BACKLOG_TRANSITION_ERROR="backlog item $ID is not dispatchable in state $row"
-      return 1
-      ;;
-  esac
+  fm_backlog_atomic_transition dispatch "$STATE/$ID.meta" "$DATA" "$ID"
 }
 
 if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_META_PUBLISH_STARTED=1
-  mv -f "$SPAWN_META_TMP" "$STATE/$ID.meta"
+  if ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$STATE/$ID.meta" "task record"; then
+    echo "error: replacement task record for $ID could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+    exit 1
+  fi
   RELAUNCH_REPLACEMENT_PENDING=0
   SPAWN_META_PUBLISH_STARTED=0
   SPAWN_META_TMP=
@@ -2958,7 +2940,7 @@ spawn_record_traceparent() {
   if [ ! -f "$meta" ] || [ ! -w "$meta" ] \
      || ! awk -F= '$1 != "traceparent"' "$meta" > "$SPAWN_META_TMP" \
      || ! printf 'traceparent=%s\n' "$SPAWN_TRACEPARENT" >> "$SPAWN_META_TMP" \
-     || ! mv -f "$SPAWN_META_TMP" "$meta"; then
+     || ! fm_backlog_atomic_transition publish "$SPAWN_META_TMP" "$meta" "task record"; then
     status=1
     rm -f "$SPAWN_META_TMP" 2>/dev/null || true
   fi

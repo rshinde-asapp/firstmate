@@ -176,6 +176,35 @@ SH
   chmod +x "$case_dir/fakebin/rm"
 }
 
+break_busy_removal() {  # <case-dir> <id>
+  local case_dir=$1 id=$2 real state
+  real=$(command -v rm)
+  state="$(home_of "$case_dir")/state"
+  cat > "$case_dir/fakebin/rm" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  case "\$arg" in
+    "$state/$id.busy-state"|"$state/$id.busy-gen") exit 1 ;;
+  esac
+done
+exec "$real" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/rm"
+}
+
+break_meta_publication() {  # <case-dir> <meta-path>
+  local case_dir=$1 meta=$2 real
+  real=$(command -v mv)
+  cat > "$case_dir/fakebin/mv" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  [ "\$arg" != "$meta" ] || exit 1
+done
+exec "$real" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/mv"
+}
+
 write_task_meta() {  # <case-dir> <id> <kind> <mode> [extra-line...]
   local case_dir=$1 id=$2 kind=$3 mode=$4
   shift 4
@@ -289,6 +318,26 @@ test_dispatch_refuses_a_closed_item() {
   pass "dispatch refuses a closed item instead of silently reopening it"
 }
 
+test_dispatch_refuses_to_commit_without_a_published_record() {
+  local case_dir id meta out rc=0
+  id=atomic-dispatch-publish-failure-b4
+  case_dir=$(make_home dispatch-publish-failure "$id")
+  add_item "$case_dir" "$id"
+  meta="$(home_of "$case_dir")/state/$id.meta"
+  break_meta_publication "$case_dir" "$meta"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn succeeded without publishing its task record"
+  assert_contains "$out" "task record for $id could not be published" \
+    "spawn did not report task-record publication failure"
+  assert_absent "$meta" "failed publication left a task record"
+  assert_absent "$(home_of "$case_dir")/state/$id.busy-state" \
+    "failed publication retained its busy state"
+  [ "$(row_state "$case_dir" "$id")" = queued ] \
+    || fail "failed publication moved the backlog row"
+  pass "dispatch cannot commit without a verified task-record publication"
+}
+
 test_dispatch_leaves_no_record_when_the_transition_fails() {
   local case_dir id out rc=0
   id=atomic-dispatch-b4
@@ -328,6 +377,27 @@ test_dispatch_reports_an_incomplete_record_rollback() {
   [ "$(row_state "$case_dir" "$id")" = queued ] \
     || fail "failed rollback changed the backlog row"
   pass "dispatch reports when failed-transition rollback cannot remove its record"
+}
+
+test_dispatch_reports_an_incomplete_busy_rollback() {
+  local case_dir id out rc=0
+  id=atomic-dispatch-busy-remove-failure-b5
+  case_dir=$(make_home dispatch-busy-remove-failure "$id")
+  add_item "$case_dir" "$id"
+  break_verb "$case_dir" start
+  break_busy_removal "$case_dir" "$id"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn succeeded though busy rollback failed"
+  assert_contains "$out" "did not remove both task and busy records" \
+    "spawn did not report incomplete busy rollback"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "busy rollback failure retained the provisional task record"
+  assert_present "$(home_of "$case_dir")/state/$id.busy-state" \
+    "busy removal failure was reported as successful"
+  [ "$(row_state "$case_dir" "$id")" = queued ] \
+    || fail "failed busy rollback changed the backlog row"
+  pass "dispatch verifies both task and busy records during rollback"
 }
 
 test_dispatch_rolls_back_before_a_failed_launch_delivery() {
@@ -445,6 +515,28 @@ test_completion_closes_a_scout_with_its_report() {
   pass "completion closes a scout item against its report"
 }
 
+test_completion_preserves_records_when_meta_removal_fails() {
+  local case_dir id meta marker out rc=0
+  id=atomic-close-meta-remove-failure-b7
+  case_dir=$(make_home close-meta-remove-failure)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-one"
+  meta="$(home_of "$case_dir")/state/$id.meta"
+  marker="$(home_of "$case_dir")/state/$id.backlog-close"
+  break_meta_removal "$case_dir" "$meta"
+
+  out=$(run_teardown "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "teardown succeeded though task-record removal failed"
+  assert_contains "$out" "task record could not be removed" \
+    "teardown did not report task-record removal failure"
+  assert_present "$meta" "teardown lost meta after its removal failed"
+  assert_present "$marker" "teardown discarded recovery after meta removal failed"
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] \
+    || fail "teardown closed the row before verifying meta removal"
+  pass "completion preserves recovery state when task-record removal fails"
+}
+
 test_completion_fails_loudly_and_records_the_close_it_still_owes() {
   local case_dir id out rc=0
   id=atomic-close-b7
@@ -497,7 +589,7 @@ test_recovery_retries_when_a_close_marker_cannot_be_removed() {
   break_meta_removal "$case_dir" "$marker"
 
   out=$(run_bootstrap "$case_dir")
-  assert_contains "$out" "could not remove pending-close record" \
+  assert_contains "$out" "pending-close record could not be removed" \
     "session start did not report close-marker removal failure"
   assert_present "$marker" "recovery hid a close-marker removal failure"
   [ "$(row_state "$case_dir" "$id")" = done ] \
@@ -603,7 +695,7 @@ test_recovery_preserves_both_records_when_meta_removal_fails() {
   break_meta_removal "$case_dir" "$meta"
 
   out=$(run_bootstrap "$case_dir")
-  assert_contains "$out" "could not remove the interrupted task record" \
+  assert_contains "$out" "the interrupted task record could not be removed" \
     "session start did not surface the record-removal failure"
   assert_present "$meta" "failed recovery removed the task record"
   assert_present "$(home_of "$case_dir")/state/$id.backlog-close" \
@@ -743,14 +835,17 @@ test_dispatch_moves_the_item_in_flight_in_the_same_run
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_reports_a_backlog_read_failure
 test_dispatch_refuses_a_closed_item
+test_dispatch_refuses_to_commit_without_a_published_record
 test_dispatch_leaves_no_record_when_the_transition_fails
 test_dispatch_reports_an_incomplete_record_rollback
+test_dispatch_reports_an_incomplete_busy_rollback
 test_dispatch_rolls_back_before_a_failed_launch_delivery
 test_dispatch_defers_interruption_across_backlog_commit
 test_dispatch_does_not_resurrect_a_row_closed_after_preflight
 test_dispatch_fails_when_its_row_vanishes_after_preflight
 test_completion_closes_a_local_only_ship_before_reporting_success
 test_completion_closes_a_scout_with_its_report
+test_completion_preserves_records_when_meta_removal_fails
 test_completion_fails_loudly_and_records_the_close_it_still_owes
 test_completion_fails_when_its_close_marker_cannot_be_removed
 test_recovery_retries_when_a_close_marker_cannot_be_removed

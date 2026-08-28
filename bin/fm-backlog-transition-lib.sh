@@ -158,6 +158,97 @@ fm_backlog_done() {  # <data-dir> <id> [flag...]
   fm_backlog_mutate "$data" "done" "$id" "$@"
 }
 
+fm_backlog_record_present() {
+  local path=$1
+  if [ ! -f "$path" ] || [ -L "$path" ]; then
+    FM_BACKLOG_TRANSITION_ERROR="task record publication did not land at $path"
+    return 1
+  fi
+  return 0
+}
+
+fm_backlog_record_remove() {
+  local path=$1 label=$2
+  if ! rm -f "$path" 2>/dev/null || [ -e "$path" ] || [ -L "$path" ]; then
+    FM_BACKLOG_TRANSITION_ERROR="$label could not be removed at $path"
+    return 1
+  fi
+  return 0
+}
+
+fm_backlog_record_publish() {
+  local source=$1 target=$2 label=$3
+  if ! mv -f "$source" "$target" 2>/dev/null || ! fm_backlog_record_present "$target"; then
+    [ -n "$FM_BACKLOG_TRANSITION_ERROR" ] \
+      || FM_BACKLOG_TRANSITION_ERROR="$label publication failed at $target"
+    return 1
+  fi
+  return 0
+}
+
+fm_backlog_dispatch_transition() {
+  local meta=$1 data=$2 id=$3 row row_status
+  fm_backlog_record_present "$meta" || return 1
+  fm_backlog_row_probe "$data" "$id"
+  row_status=$?
+  if [ "$row_status" -ne 0 ]; then
+    if [ "$FM_BACKLOG_ROW_RESULT" = not_found ]; then
+      FM_BACKLOG_TRANSITION_ERROR="backlog item $id vanished before dispatch commit"
+    else
+      FM_BACKLOG_TRANSITION_ERROR=$FM_BACKLOG_ROW_ERROR
+    fi
+    return "$row_status"
+  fi
+  row=$FM_BACKLOG_ROW_STATE
+  case "$row" in
+    in_flight\ *) return 0 ;;
+    queued\ no) fm_backlog_start "$data" "$id" ;;
+    *)
+      FM_BACKLOG_TRANSITION_ERROR="backlog item $id is not dispatchable in state $row"
+      return 1
+      ;;
+  esac
+}
+
+fm_backlog_dispatch_rollback() {
+  local meta=$1 busy_script=$2 state=$3 id=$4 gen=$5 failed=0
+  fm_backlog_record_remove "$meta" "provisional task record" || failed=1
+  if [ -n "$gen" ]; then
+    "$busy_script" retire "$state" "$id" --gen "$gen" >/dev/null 2>&1 || failed=1
+    if [ -e "$state/$id.busy-state" ] || [ -L "$state/$id.busy-state" ] \
+       || [ -e "$state/$id.busy-gen" ] || [ -L "$state/$id.busy-gen" ]; then
+      failed=1
+    fi
+  fi
+  if [ "$failed" -ne 0 ]; then
+    FM_BACKLOG_TRANSITION_ERROR="failed-dispatch cleanup did not remove both task and busy records for $id"
+    return 1
+  fi
+  return 0
+}
+
+fm_backlog_close_transition() {
+  local meta=$1 marker=$2 data=$3 id=$4
+  shift 4
+  [ -z "$meta" ] || fm_backlog_record_remove "$meta" "task record" || return 1
+  fm_backlog_done "$data" "$id" "$@" || return 1
+  fm_backlog_record_remove "$marker" "pending-close record"
+}
+
+fm_backlog_atomic_transition() {
+  local operation=$1
+  shift
+  case "$operation" in
+    publish) fm_backlog_record_publish "$@" ;;
+    verify-published) fm_backlog_record_present "$@" ;;
+    remove) fm_backlog_record_remove "$@" ;;
+    dispatch) fm_backlog_dispatch_transition "$@" ;;
+    rollback) fm_backlog_dispatch_rollback "$@" ;;
+    close) fm_backlog_close_transition "$@" ;;
+    *) FM_BACKLOG_TRANSITION_ERROR="unknown backlog atomic transition $operation"; return 2 ;;
+  esac
+}
+
 fm_backlog_close_marker_path() {  # <state-dir> <id>
   printf '%s/%s.backlog-close\n' "$1" "$2"
 }
@@ -180,17 +271,12 @@ fm_backlog_close_marker_write() {  # <state-dir> <id> <data-dir> <spawn-gen> [fl
       printf 'arg=%s\n' "$arg"
     done
   } > "$tmp" || { rm -f "$tmp"; return 1; }
-  mv -f "$tmp" "$marker" || { rm -f "$tmp"; return 1; }
-  return 0
+  fm_backlog_atomic_transition publish "$tmp" "$marker" "pending-close record" \
+    || { rm -f "$tmp"; return 1; }
 }
 
 fm_backlog_close_marker_remove() {  # <marker-path>
-  local marker=$1
-  if ! rm -f "$marker" 2>/dev/null || [ -e "$marker" ] || [ -L "$marker" ]; then
-    FM_BACKLOG_TRANSITION_ERROR="could not remove pending-close record $marker"
-    return 1
-  fi
-  return 0
+  fm_backlog_atomic_transition remove "$1" "pending-close record"
 }
 
 fm_backlog_close_marker_clear() {  # <state-dir> <id>
@@ -225,10 +311,8 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path>
       FM_BACKLOG_CLOSE_REPLAY_RESULT=stale
       return 0
     fi
-    if ! rm -f "$state/$id.meta" || [ -e "$state/$id.meta" ]; then
-      FM_BACKLOG_TRANSITION_ERROR="could not remove the interrupted task record $state/$id.meta"
-      return 1
-    fi
+    fm_backlog_atomic_transition remove "$state/$id.meta" "the interrupted task record" \
+      || return 1
   fi
   if fm_backlog_row_probe "$data" "$id"; then
     row_state=$FM_BACKLOG_ROW_STATE
@@ -247,8 +331,8 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path>
       return 0
       ;;
   esac
-  if fm_backlog_done "$data" "$id" "${args[@]+"${args[@]}"}"; then
-    fm_backlog_close_marker_remove "$marker" || return 1
+  if fm_backlog_atomic_transition close '' "$marker" "$data" "$id" \
+      "${args[@]+"${args[@]}"}"; then
     FM_BACKLOG_CLOSE_REPLAY_RESULT=closed
     return 0
   fi

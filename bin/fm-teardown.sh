@@ -649,7 +649,8 @@ remote_secondmate_teardown() {
   grep -vE "^- $ID( |$)" "$SECONDMATE_REG" > "$tmp" || true
   mv -f -- "$tmp" "$SECONDMATE_REG"
   status_retire_presentation_task "$STATE" "$ID" || return 1
-  rm -f -- "$STATE/$ID.meta" "$STATE/$ID.turn-ended"
+  fm_backlog_atomic_transition remove "$STATE/$ID.meta" "task record" || return 1
+  rm -f -- "$STATE/$ID.turn-ended"
   printf 'teardown %s complete (remote %s:%s)\n' "$ID" "$remote_host" "$remote_home"
   return 0
 }
@@ -2520,8 +2521,9 @@ cleanup_firstmate_home_children() {
     fi
     retire_busy_state "$sub_state" "$child_id" "$child_busy_gen" || return 1
     status_retire_presentation_task "$sub_state" "$child_id" || return 1
+    fm_backlog_atomic_transition remove "$sub_state/$child_id.meta" "task record" || return 1
     rm -f "$sub_state/$child_id.turn-ended" \
-      "$sub_state/$child_id.meta" "$sub_state/$child_id.pi-ext.ts" \
+      "$sub_state/$child_id.pi-ext.ts" \
       "$sub_state/$child_id.grok-turnend-token" "$sub_state/$child_id.kimi-turnend-token" \
       "$sub_state/$child_id.muse-session" "$sub_state/$child_id.muse-session-current" \
       "$sub_state/$child_id.cursor-session" "$sub_state/$child_id.reconcile-nudged"
@@ -2852,7 +2854,7 @@ if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
 else
   BACKLOG_SKIP_REASON=$FM_BACKLOG_TRANSITION_SKIP
 fi
-rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.meta" \
+rm -f "$STATE/$ID.turn-ended" \
   "$STATE/$ID.pi-ext.ts" "$STATE/$ID.grok-turnend-token" \
   "$STATE/$ID.kimi-turnend-token" "$STATE/$ID.muse-session" \
   "$STATE/$ID.muse-session-current" "$STATE/$ID.cursor-session" \
@@ -2867,18 +2869,19 @@ rm -rf "$STATE/$ID.inbox"
 # when teardown reports success. Still under this task's meta lock, so a steer
 # racing the same id stays serialized exactly as it was before.
 if [ "$BACKLOG_CLOSED" = 1 ]; then
-  if fm_backlog_done "$DATA" "$ID" \
-      "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
-    if ! fm_backlog_close_marker_clear "$STATE" "$ID"; then
-      fm_lock_release "$META_LOCK"
-      META_LOCK_HELD=0
-      echo "error: $ID's backlog item is closed, but its pending-close record could not be removed ($FM_BACKLOG_TRANSITION_ERROR); teardown is incomplete and the next session start retries the removal" >&2
-      exit 1
-    fi
-  else
+  BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
+  if ! fm_backlog_atomic_transition close "$STATE/$ID.meta" "$BACKLOG_CLOSE_MARKER" \
+      "$DATA" "$ID" "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
     fm_lock_release "$META_LOCK"
     META_LOCK_HELD=0
-    echo "error: $ID's endpoint and local copy are cleaned up, but its backlog item could not be closed ($FM_BACKLOG_TRANSITION_ERROR); the pending close is recorded and the next session start retries it - fix the backlog if it does not clear" >&2
+    echo "error: $ID's endpoint and local copy are cleaned up, but its backlog item could not be closed atomically ($FM_BACKLOG_TRANSITION_ERROR); the pending close is recorded and the next session start retries it" >&2
+    exit 1
+  fi
+else
+  if ! fm_backlog_atomic_transition remove "$STATE/$ID.meta" "task record"; then
+    fm_lock_release "$META_LOCK"
+    META_LOCK_HELD=0
+    echo "error: $ID's endpoint and local copy are cleaned up, but its task record could not be removed ($FM_BACKLOG_TRANSITION_ERROR)" >&2
     exit 1
   fi
 fi
