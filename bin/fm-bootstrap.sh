@@ -1228,8 +1228,15 @@ backlog_record_reconcile() {
     id=$(basename "$meta" .meta)
     meta_lock=$(fm_meta_lock_path "$meta") || continue
     fm_lock_try_acquire "$meta_lock" || continue
-    if [ -e "$meta" ] && [ "$(fm_meta_get "$meta" kind)" != secondmate ]; then
-      row=$(fm_backlog_row_state "$DATA" "$id" || true)
+    if [ -e "$meta" ] \
+       && [ "$(fm_meta_get "$meta" kind)" != secondmate ] \
+       && [ "$(fm_meta_get "$meta" cleanup_recovery)" != orca ]; then
+      row=
+      if fm_backlog_row_probe "$DATA" "$id"; then
+        row=$FM_BACKLOG_ROW_STATE
+      elif [ "$FM_BACKLOG_ROW_RESULT" != not_found ]; then
+        echo "BACKLOG_RECONCILE: $id: worker record exists but its backlog item could not be read: $FM_BACKLOG_ROW_ERROR"
+      fi
       # Heal only the unambiguous case: a queued row for a record this home
       # already owns. A held row is the captain's to move, and a closed row is a
       # contradiction this sweep must not resolve by resurrecting the item.

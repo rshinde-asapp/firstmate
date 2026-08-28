@@ -777,11 +777,19 @@ spawn_abort_cleanup() {
     fi
     if [ -n "${ORCA_WORKTREE_ID:-}" ]; then
       if ! fm_backend_remove_worktree orca "$ORCA_WORKTREE_ID" 2>/dev/null; then
+        if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ]; then
+          if ! spawn_fresh_commit_rollback; then
+            status=1
+          fi
+          SPAWN_FRESH_COMMIT_PENDING=0
+        fi
         mkdir -p "$STATE" 2>/dev/null || true
         if [ -d "$STATE" ]; then
           SPAWN_META_TMP="$STATE/.$ID.meta.orca-recovery.${BASHPID:-$$}"
           {
             echo "window=$W"
+            echo "endpoint_task_id=$ID"
+            echo "cleanup_recovery=orca"
             echo "worktree=${WT:-}"
             echo "project=$PROJ_ABS"
             echo "harness=$HARNESS"

@@ -706,6 +706,7 @@ if [ -z "$BUSY_GEN" ]; then
 fi
 ORCA_WORKTREE_ID=$(fm_meta_get "$META" orca_worktree_id)
 ORCA_PATH_MATCH_VERIFIED=0
+CLEANUP_RECOVERY=$(fm_meta_get "$META" cleanup_recovery)
 
 KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
 [ -n "$KIND" ] || KIND=ship
@@ -1176,6 +1177,7 @@ backlog_done_args() {
 # only where a human still owes the edit.
 backlog_refresh_reminder() {
   [ "$KIND" = secondmate ] && return 0
+  [ "$CLEANUP_RECOVERY" = orca ] && return 0
   if [ "$BACKLOG_CLOSED" = 1 ]; then
     printf '%s\n' "Backlog: $ID is closed in data/backlog.md. Run tasks-axi ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due."
   else
@@ -2844,7 +2846,8 @@ status_retire_presentation_task "$STATE" "$ID" || exit 1
 # for the next session start to finish it (bin/fm-backlog-transition-lib.sh).
 BACKLOG_CLOSED=0
 BACKLOG_SKIP_REASON=
-if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
+if [ "$CLEANUP_RECOVERY" != orca ] \
+   && fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
   BACKLOG_CLOSED=1
   backlog_done_args
   META_SPAWN_GEN=$(fm_meta_get "$META" spawn_gen)
@@ -2852,7 +2855,11 @@ if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
     "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}" \
     || { echo "error: the pending backlog close for $ID could not be recorded; retaining every durable task record" >&2; exit 1; }
 else
-  BACKLOG_SKIP_REASON=$FM_BACKLOG_TRANSITION_SKIP
+  if [ "$CLEANUP_RECOVERY" = orca ]; then
+    BACKLOG_SKIP_REASON="Orca cleanup recovery is not a launched backlog worker"
+  else
+    BACKLOG_SKIP_REASON=$FM_BACKLOG_TRANSITION_SKIP
+  fi
 fi
 rm -f "$STATE/$ID.turn-ended" \
   "$STATE/$ID.pi-ext.ts" "$STATE/$ID.grok-turnend-token" \

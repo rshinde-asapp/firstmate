@@ -601,6 +601,48 @@ test_recovery_retries_when_a_close_marker_cannot_be_removed() {
   pass "session start retries a close whose marker could not be removed"
 }
 
+test_recovery_reports_an_owned_row_read_failure() {
+  local case_dir id out
+  id=atomic-heal-read-failure-b8
+  case_dir=$(make_home heal-owned-read-failure)
+  add_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship no-mistakes
+  break_verb "$case_dir" show
+
+  out=$(run_bootstrap "$case_dir")
+  assert_contains "$out" "worker record exists but its backlog item could not be read" \
+    "session start silently ignored an owned-row read failure"
+  assert_contains "$out" "backlog is unwritable" \
+    "session start discarded the backlog reader's diagnostic"
+  rm -f "$case_dir/fakebin/tasks-axi"
+  [ "$(row_state "$case_dir" "$id")" = queued ] \
+    || fail "owned-row read failure changed the backlog state"
+  assert_present "$(home_of "$case_dir")/state/$id.meta" \
+    "owned-row read failure removed the worker record"
+  pass "session start reports owned backlog rows it cannot read"
+}
+
+test_orca_cleanup_recovery_never_transitions_the_backlog() {
+  local case_dir id meta out
+  id=atomic-orca-cleanup-recovery-b8
+  case_dir=$(make_home orca-cleanup-recovery)
+  add_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship local-only "cleanup_recovery=orca"
+  meta="$(home_of "$case_dir")/state/$id.meta"
+
+  out=$(run_bootstrap "$case_dir")
+  [ "$(row_state "$case_dir" "$id")" = queued ] \
+    || fail "session start treated cleanup recovery as a launched worker: $out"
+  assert_present "$meta" "session start removed the cleanup recovery record"
+
+  out=$(run_teardown "$case_dir" "$id") \
+    || fail "cleanup recovery teardown failed: $out"
+  [ "$(row_state "$case_dir" "$id")" = queued ] \
+    || fail "cleanup recovery teardown completed work that never launched"
+  assert_absent "$meta" "cleanup recovery teardown retained its task record"
+  pass "Orca cleanup recovery is excluded from backlog lifecycle transitions"
+}
+
 test_recovery_marks_an_owned_record_in_flight() {
   local case_dir id out
   id=atomic-heal-b8
@@ -849,6 +891,8 @@ test_completion_preserves_records_when_meta_removal_fails
 test_completion_fails_loudly_and_records_the_close_it_still_owes
 test_completion_fails_when_its_close_marker_cannot_be_removed
 test_recovery_retries_when_a_close_marker_cannot_be_removed
+test_recovery_reports_an_owned_row_read_failure
+test_orca_cleanup_recovery_never_transitions_the_backlog
 test_recovery_marks_an_owned_record_in_flight
 test_recovery_replays_a_close_an_interrupted_cleanup_left_open
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read
