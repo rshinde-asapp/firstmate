@@ -1964,12 +1964,16 @@ BACKLOG_TRANSITION=0
 BACKLOG_ROW_STATE=
 if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
   BACKLOG_TRANSITION=1
-  BACKLOG_ROW_STATE=$(fm_backlog_row_state "$DATA" "$ID" || true)
+  if fm_backlog_row_probe "$DATA" "$ID"; then
+    BACKLOG_ROW_STATE=$FM_BACKLOG_ROW_STATE
+  elif [ "$FM_BACKLOG_ROW_RESULT" = not_found ]; then
+    echo "error: task $ID has no backlog item in this home, so dispatching it would leave a worker no record owns; add it first (tasks-axi add $ID '<title>' --kind $KIND) and re-run" >&2
+    exit 1
+  else
+    echo "error: task $ID's backlog item could not be read before dispatch ($FM_BACKLOG_ROW_ERROR)" >&2
+    exit 1
+  fi
   case "$BACKLOG_ROW_STATE" in
-    '')
-      echo "error: task $ID has no backlog item in this home, so dispatching it would leave a worker no record owns; add it first (tasks-axi add $ID '<title>' --kind $KIND) and re-run" >&2
-      exit 1
-      ;;
     done\ *)
       echo "error: this home's backlog records $ID as finished; refusing to dispatch onto a closed item (reopen it with tasks-axi reopen $ID, or use a new task id)" >&2
       exit 1
@@ -2832,18 +2836,20 @@ fi
 # serialized exactly as before. The call itself is deferred to the final commit
 # point below so every earlier launch-delivery failure remains unwindable.
 spawn_commit_backlog_transition() {
-  local row
+  local row row_status
   [ "$BACKLOG_TRANSITION" = 1 ] || return 0
   # Re-verify rather than assume. A relaunch republishes a record whose row is
   # normally already In flight, and blindly re-running the transition on a row
   # tasks-axi has since closed would silently resurrect it.
-  if ! fm_backlog_row_probe "$DATA" "$ID"; then
+  fm_backlog_row_probe "$DATA" "$ID"
+  row_status=$?
+  if [ "$row_status" -ne 0 ]; then
     if [ "$FM_BACKLOG_ROW_RESULT" = not_found ]; then
       FM_BACKLOG_TRANSITION_ERROR="backlog item $ID vanished before dispatch commit"
     else
       FM_BACKLOG_TRANSITION_ERROR=$FM_BACKLOG_ROW_ERROR
     fi
-    return 1
+    return "$row_status"
   fi
   row=$FM_BACKLOG_ROW_STATE
   case "$row" in
@@ -2964,13 +2970,6 @@ spawn_record_traceparent() {
   return "$status"
 }
 
-# Once launch delivery can start the worker, defer catchable interruption until
-# the paired backlog state is committed. Otherwise a signal after Enter but
-# before tasks-axi could leave a running worker whose provisional record EXIT
-# cleanup removes. Commands run directly by this shell inherit the ignored
-# dispositions; explicit delivery failures still exit through ordinary cleanup.
-trap '' HUP INT TERM
-
 # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
@@ -2999,29 +2998,41 @@ if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
   HERDR_PROJECTION_ABORT_CLEANUP=0
   spawn_herdr_presentation_order_lock_release
 fi
+SPAWN_DEFERRED_SIGNAL=
+if [ "$BACKLOG_TRANSITION" = 1 ]; then
+  trap 'SPAWN_DEFERRED_SIGNAL=HUP' HUP
+  trap 'SPAWN_DEFERRED_SIGNAL=INT' INT
+  trap 'SPAWN_DEFERRED_SIGNAL=TERM' TERM
+fi
 spawn_send_key "$T" Enter
 if [ "$HARNESS" = kimi ]; then
+  KIMI_DELIVERY_FAILED=0
   if ! kimi_wait_for_ready; then
     kimi_spawn_fail "kimi did not show a verified ready signal before brief delivery"
-    exit 1
+    [ -n "$SPAWN_DEFERRED_SIGNAL" ] || exit 1
+    KIMI_DELIVERY_FAILED=1
   fi
-  KIMI_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
-  KIMI_SUBMIT_RETRIES=${FM_KIMI_SUBMIT_RETRIES:-3}
-  KIMI_SUBMIT_SLEEP=${FM_KIMI_SUBMIT_SLEEP:-${FM_KIMI_POLL_INTERVAL:-0.5}}
-  KIMI_SUBMIT_SETTLE=${FM_KIMI_SUBMIT_SETTLE:-0}
-  KIMI_SUBMIT_VERDICT=$(fm_backend_send_text_submit \
-    "$BACKEND" "$T" "$KIMI_POINTER" "$KIMI_SUBMIT_RETRIES" \
-    "$KIMI_SUBMIT_SLEEP" "$KIMI_SUBMIT_SETTLE" "$W") || {
-    kimi_spawn_fail "kimi brief pointer could not be submitted"
-    exit 1
-  }
-  if [ "$KIMI_SUBMIT_VERDICT" = send-failed ]; then
-    kimi_spawn_fail "kimi brief pointer could not be submitted"
-    exit 1
+  if [ "$KIMI_DELIVERY_FAILED" = 0 ]; then
+    KIMI_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
+    KIMI_SUBMIT_RETRIES=${FM_KIMI_SUBMIT_RETRIES:-3}
+    KIMI_SUBMIT_SLEEP=${FM_KIMI_SUBMIT_SLEEP:-${FM_KIMI_POLL_INTERVAL:-0.5}}
+    KIMI_SUBMIT_SETTLE=${FM_KIMI_SUBMIT_SETTLE:-0}
+    if ! KIMI_SUBMIT_VERDICT=$(fm_backend_send_text_submit \
+        "$BACKEND" "$T" "$KIMI_POINTER" "$KIMI_SUBMIT_RETRIES" \
+        "$KIMI_SUBMIT_SLEEP" "$KIMI_SUBMIT_SETTLE" "$W"); then
+      kimi_spawn_fail "kimi brief pointer could not be submitted"
+      [ -n "$SPAWN_DEFERRED_SIGNAL" ] || exit 1
+      KIMI_DELIVERY_FAILED=1
+    fi
   fi
-  if ! kimi_wait_for_delivery; then
+  if [ "$KIMI_DELIVERY_FAILED" = 0 ] && [ "$KIMI_SUBMIT_VERDICT" = send-failed ]; then
+    kimi_spawn_fail "kimi brief pointer could not be submitted"
+    [ -n "$SPAWN_DEFERRED_SIGNAL" ] || exit 1
+    KIMI_DELIVERY_FAILED=1
+  fi
+  if [ "$KIMI_DELIVERY_FAILED" = 0 ] && ! kimi_wait_for_delivery; then
     kimi_spawn_fail "kimi brief pointer delivery was not confirmed"
-    exit 1
+    [ -n "$SPAWN_DEFERRED_SIGNAL" ] || exit 1
   fi
 fi
 if [ "$KIND" = secondmate ] && [ "${FM_SKIP_SECONDMATE_INHERIT:-0}" != 1 ]; then
@@ -3042,17 +3053,17 @@ if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   fm_lock_acquire_wait "$SPAWN_META_LOCK"
   SPAWN_META_LOCK_HELD=1
 fi
-# Complete the uninterruptible catchable-signal region begun before launch
-# delivery. Clearing the provisional flag before tasks-axi could preserve a
-# queued record; clearing it after tasks-axi could let EXIT cleanup delete an
-# In-flight record. Keeping signals ignored across both operations closes both
-# races. An uncatchable crash still leaves the published record for bootstrap
-# recovery.
 SPAWN_BACKLOG_COMMIT_STATUS=0
 if spawn_commit_backlog_transition; then
   SPAWN_FRESH_COMMIT_PENDING=0
 else
   SPAWN_BACKLOG_COMMIT_STATUS=$?
+  if spawn_commit_backlog_transition; then
+    SPAWN_BACKLOG_COMMIT_STATUS=0
+    SPAWN_FRESH_COMMIT_PENDING=0
+  fi
+fi
+if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
   if [ "$RELAUNCH" -eq 0 ]; then
     if spawn_fresh_commit_rollback; then
       echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
@@ -3069,6 +3080,15 @@ if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
 fi
 fm_lock_release "$SPAWN_META_LOCK"
 SPAWN_META_LOCK_HELD=0
+if [ -n "$SPAWN_DEFERRED_SIGNAL" ]; then
+  case "$SPAWN_DEFERRED_SIGNAL" in
+    HUP) SPAWN_DEFERRED_SIGNAL_STATUS=129 ;;
+    INT) SPAWN_DEFERRED_SIGNAL_STATUS=130 ;;
+    TERM) SPAWN_DEFERRED_SIGNAL_STATUS=143 ;;
+  esac
+  echo "error: spawn of $ID was interrupted after launch delivery began; its paired task record and In-flight backlog state were preserved" >&2
+  exit "$SPAWN_DEFERRED_SIGNAL_STATUS"
+fi
 
 SPAWN_DELIVERY=
 [ -z "$MODE" ] || SPAWN_DELIVERY=" mode=$MODE yolo=$YOLO"

@@ -98,11 +98,13 @@ fm_backlog_transition_applies() {  # <config-dir> <data-dir> <kind>
 }
 
 fm_backlog_row_probe() {  # <data-dir> <id>
-  local data=$1 id=$2 out state held
+  local data=$1 id=$2 out state held command_status
   FM_BACKLOG_ROW_RESULT=error
   FM_BACKLOG_ROW_STATE=
   FM_BACKLOG_ROW_ERROR=
-  if ! out=$(tasks-axi show "$id" --file "$(fm_backlog_file "$data")" 2>&1); then
+  out=$(tasks-axi show "$id" --file "$(fm_backlog_file "$data")" 2>&1)
+  command_status=$?
+  if [ "$command_status" -ne 0 ]; then
     if printf '%s\n' "$out" | grep -q '^code: NOT_FOUND$'; then
       FM_BACKLOG_ROW_RESULT=not_found
     else
@@ -110,7 +112,7 @@ fm_backlog_row_probe() {  # <data-dir> <id>
       [ -n "$FM_BACKLOG_ROW_ERROR" ] \
         || FM_BACKLOG_ROW_ERROR="tasks-axi show $id failed with no output"
     fi
-    return 1
+    return "$command_status"
   fi
   state=$(printf '%s\n' "$out" | sed -n 's/^  state: *//p' | head -1)
   held=$(printf '%s\n' "$out" | sed -n 's/^  held: *//p' | head -1)
@@ -133,17 +135,17 @@ fm_backlog_row_state() {  # <data-dir> <id>
 # Run one tasks-axi mutation against <home>'s backlog, capturing its first
 # output line in FM_BACKLOG_TRANSITION_ERROR on failure.
 fm_backlog_mutate() {  # <data-dir> <verb> <id> [flag...]
-  local data=$1 verb=$2 id=$3 out
+  local data=$1 verb=$2 id=$3 out command_status
   shift 3
   FM_BACKLOG_TRANSITION_ERROR=
-  if out=$(cd "$(fm_backlog_root "$data")" 2>/dev/null && tasks-axi "$verb" "$id" \
-      --file "$(fm_backlog_file "$data")" "$@" 2>&1); then
-    return 0
-  fi
+  out=$(cd "$(fm_backlog_root "$data")" 2>/dev/null && tasks-axi "$verb" "$id" \
+      --file "$(fm_backlog_file "$data")" "$@" 2>&1)
+  command_status=$?
+  [ "$command_status" -ne 0 ] || return 0
   FM_BACKLOG_TRANSITION_ERROR=$(printf '%s\n' "$out" | sed -n '1p')
   [ -n "$FM_BACKLOG_TRANSITION_ERROR" ] \
     || FM_BACKLOG_TRANSITION_ERROR="tasks-axi $verb $id failed with no output"
-  return 1
+  return "$command_status"
 }
 
 fm_backlog_start() {  # <data-dir> <id>
