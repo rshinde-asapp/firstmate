@@ -2869,7 +2869,12 @@ rm -rf "$STATE/$ID.inbox"
 if [ "$BACKLOG_CLOSED" = 1 ]; then
   if fm_backlog_done "$DATA" "$ID" \
       "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
-    fm_backlog_close_marker_clear "$STATE" "$ID"
+    if ! fm_backlog_close_marker_clear "$STATE" "$ID"; then
+      fm_lock_release "$META_LOCK"
+      META_LOCK_HELD=0
+      echo "error: $ID's backlog item is closed, but its pending-close record could not be removed ($FM_BACKLOG_TRANSITION_ERROR); teardown is incomplete and the next session start retries the removal" >&2
+      exit 1
+    fi
   else
     fm_lock_release "$META_LOCK"
     META_LOCK_HELD=0

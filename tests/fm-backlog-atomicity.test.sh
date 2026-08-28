@@ -290,6 +290,27 @@ test_dispatch_leaves_no_record_when_the_transition_fails() {
   pass "a failed backlog transition fails the dispatch loudly and leaves no record"
 }
 
+test_dispatch_reports_an_incomplete_record_rollback() {
+  local case_dir id meta out rc=0
+  id=atomic-dispatch-remove-failure-b5
+  case_dir=$(make_home dispatch-remove-failure "$id")
+  add_item "$case_dir" "$id"
+  meta="$(home_of "$case_dir")/state/$id.meta"
+  break_verb "$case_dir" start
+  break_meta_removal "$case_dir" "$meta"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn reported success though transition and rollback failed"
+  assert_contains "$out" "failed-dispatch cleanup is incomplete" \
+    "spawn did not report that its provisional record remained"
+  assert_present "$meta" "failed record removal was reported as successful"
+  assert_absent "$(home_of "$case_dir")/state/$id.busy-state" \
+    "record-removal failure prevented busy-state rollback"
+  [ "$(row_state "$case_dir" "$id")" = queued ] \
+    || fail "failed rollback changed the backlog row"
+  pass "dispatch reports when failed-transition rollback cannot remove its record"
+}
+
 test_dispatch_rolls_back_before_a_failed_launch_delivery() {
   local case_dir id out rc=0
   id=atomic-dispatch-delivery-fails-b5
@@ -420,7 +441,51 @@ test_completion_fails_loudly_and_records_the_close_it_still_owes() {
   pass "completion refuses to report success while its item is still open, and records what it owes"
 }
 
+test_completion_fails_when_its_close_marker_cannot_be_removed() {
+  local case_dir id marker out rc=0
+  id=atomic-close-marker-remove-failure-b8
+  case_dir=$(make_home close-marker-remove-failure)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship local-only
+  marker="$(home_of "$case_dir")/state/$id.backlog-close"
+  break_meta_removal "$case_dir" "$marker"
+
+  out=$(run_teardown "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "teardown reported success while its close marker remained"
+  assert_contains "$out" "pending-close record could not be removed" \
+    "teardown did not report its incomplete marker cleanup"
+  assert_present "$marker" "teardown hid a close-marker removal failure"
+  [ "$(row_state "$case_dir" "$id")" = done ] \
+    || fail "marker cleanup failure lost the completed backlog transition"
+  pass "completion reports failure until its durable close marker is removed"
+}
+
 # --- same-home recovery -----------------------------------------------------
+
+test_recovery_retries_when_a_close_marker_cannot_be_removed() {
+  local case_dir id marker out
+  id=atomic-heal-marker-remove-failure-b8
+  case_dir=$(make_home heal-marker-remove-failure)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  marker="$(home_of "$case_dir")/state/$id.backlog-close"
+  printf 'id=%s\ndata=%s\narg=--note\narg=local main\n' \
+    "$id" "$(home_of "$case_dir")/data" > "$marker"
+  break_meta_removal "$case_dir" "$marker"
+
+  out=$(run_bootstrap "$case_dir")
+  assert_contains "$out" "could not remove pending-close record" \
+    "session start did not report close-marker removal failure"
+  assert_present "$marker" "recovery hid a close-marker removal failure"
+  [ "$(row_state "$case_dir" "$id")" = done ] \
+    || fail "recovery did not land the close before marker cleanup"
+
+  rm -f "$case_dir/fakebin/rm"
+  out=$(run_bootstrap "$case_dir")
+  assert_absent "$marker" "recovery did not retry close-marker cleanup: $out"
+  pass "session start retries a close whose marker could not be removed"
+}
 
 test_recovery_marks_an_owned_record_in_flight() {
   local case_dir id out
@@ -656,6 +721,7 @@ test_dispatch_moves_the_item_in_flight_in_the_same_run
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_refuses_a_closed_item
 test_dispatch_leaves_no_record_when_the_transition_fails
+test_dispatch_reports_an_incomplete_record_rollback
 test_dispatch_rolls_back_before_a_failed_launch_delivery
 test_dispatch_defers_interruption_across_backlog_commit
 test_dispatch_does_not_resurrect_a_row_closed_after_preflight
@@ -663,6 +729,8 @@ test_dispatch_fails_when_its_row_vanishes_after_preflight
 test_completion_closes_a_local_only_ship_before_reporting_success
 test_completion_closes_a_scout_with_its_report
 test_completion_fails_loudly_and_records_the_close_it_still_owes
+test_completion_fails_when_its_close_marker_cannot_be_removed
+test_recovery_retries_when_a_close_marker_cannot_be_removed
 test_recovery_marks_an_owned_record_in_flight
 test_recovery_replays_a_close_an_interrupted_cleanup_left_open
 test_recovery_preserves_a_close_when_the_backlog_cannot_be_read

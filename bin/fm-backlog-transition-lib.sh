@@ -182,8 +182,19 @@ fm_backlog_close_marker_write() {  # <state-dir> <id> <data-dir> <spawn-gen> [fl
   return 0
 }
 
+fm_backlog_close_marker_remove() {  # <marker-path>
+  local marker=$1
+  if ! rm -f "$marker" 2>/dev/null || [ -e "$marker" ] || [ -L "$marker" ]; then
+    FM_BACKLOG_TRANSITION_ERROR="could not remove pending-close record $marker"
+    return 1
+  fi
+  return 0
+}
+
 fm_backlog_close_marker_clear() {  # <state-dir> <id>
-  rm -f "$(fm_backlog_close_marker_path "$1" "$2")" 2>/dev/null || true
+  local marker
+  marker=$(fm_backlog_close_marker_path "$1" "$2") || return 1
+  fm_backlog_close_marker_remove "$marker"
 }
 
 # Replay one recorded close. Returns 0 when the row is closed (or the record is
@@ -208,7 +219,7 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path>
   if [ -e "$state/$id.meta" ]; then
     meta_spawn_gen=$(sed -n 's/^spawn_gen=//p' "$state/$id.meta" | head -1)
     if [ -z "$marker_spawn_gen" ] || [ "$meta_spawn_gen" != "$marker_spawn_gen" ]; then
-      rm -f "$marker" 2>/dev/null || true
+      fm_backlog_close_marker_remove "$marker" || return 1
       FM_BACKLOG_CLOSE_REPLAY_RESULT=stale
       return 0
     fi
@@ -229,13 +240,13 @@ fm_backlog_close_marker_replay() {  # <state-dir> <marker-path>
   case "$row_state" in
     done\ *|'')
       # Already closed, or the row is gone entirely: nothing is owed.
-      rm -f "$marker" 2>/dev/null || true
+      fm_backlog_close_marker_remove "$marker" || return 1
       FM_BACKLOG_CLOSE_REPLAY_RESULT=stale
       return 0
       ;;
   esac
   if fm_backlog_done "$data" "$id" "${args[@]+"${args[@]}"}"; then
-    rm -f "$marker" 2>/dev/null || true
+    fm_backlog_close_marker_remove "$marker" || return 1
     FM_BACKLOG_CLOSE_REPLAY_RESULT=closed
     return 0
   fi

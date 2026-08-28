@@ -699,6 +699,25 @@ RELAUNCH_REPLACEMENT_WT=
 CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 
+spawn_fresh_commit_rollback() {
+  local failed=0
+  if ! rm -f "$STATE/$ID.meta" 2>/dev/null \
+     || [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; then
+    echo "error: could not remove provisional task record $STATE/$ID.meta after failed dispatch" >&2
+    failed=1
+  fi
+  if [ -n "${BUSY_GEN:-}" ]; then
+    if ! "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" >/dev/null 2>&1; then
+      echo "warning: could not retire the busy generation armed for $ID" >&2
+      failed=1
+    fi
+  fi
+  if [ "$failed" = 0 ]; then
+    SPAWN_FRESH_COMMIT_PENDING=0
+  fi
+  return "$failed"
+}
+
 parse_orca_worktree_result() {
   local raw=$1 rest
   ORCA_WORKTREE_ID=${raw%%$'\t'*}
@@ -793,10 +812,8 @@ spawn_abort_cleanup() {
     fm_lock_release "$SPAWN_TASK_LOCK" || true
   fi
   if [ "$SPAWN_FRESH_COMMIT_PENDING" = 1 ]; then
-    SPAWN_FRESH_COMMIT_PENDING=0
-    rm -f "$STATE/$ID.meta" 2>/dev/null || true
-    if [ -n "${BUSY_GEN:-}" ]; then
-      "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" >/dev/null 2>&1 || true
+    if ! spawn_fresh_commit_rollback; then
+      status=1
     fi
   fi
   if [ "$SPAWN_META_LOCK_HELD" = 1 ]; then
@@ -3037,21 +3054,17 @@ if spawn_commit_backlog_transition; then
 else
   SPAWN_BACKLOG_COMMIT_STATUS=$?
   if [ "$RELAUNCH" -eq 0 ]; then
-    rm -f "$STATE/$ID.meta"
-    SPAWN_FRESH_COMMIT_PENDING=0
-    if [ -n "${BUSY_GEN:-}" ]; then
-      "$FM_ROOT/bin/fm-busy-event.sh" retire "$STATE" "$ID" --gen "$BUSY_GEN" \
-        || echo "warning: could not retire the busy generation armed for $ID" >&2
+    if spawn_fresh_commit_rollback; then
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
+    else
+      echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR), and failed-dispatch cleanup is incomplete; the provisional record may remain at $STATE/$ID.meta - close out endpoint $T and local copy $WT by hand, then remove the record and busy state before retrying" >&2
     fi
-    echo "error: task $ID's backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); its record was removed so no worker is left that the backlog does not own - close out endpoint $T and local copy $WT by hand, then re-run the spawn" >&2
   else
     echo "error: task $ID was republished but its backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); fix the backlog and re-run the relaunch" >&2
   fi
 fi
 trap - HUP INT TERM
 if [ "$SPAWN_BACKLOG_COMMIT_STATUS" -ne 0 ]; then
-  fm_lock_release "$SPAWN_META_LOCK"
-  SPAWN_META_LOCK_HELD=0
   exit "$SPAWN_BACKLOG_COMMIT_STATUS"
 fi
 fm_lock_release "$SPAWN_META_LOCK"
