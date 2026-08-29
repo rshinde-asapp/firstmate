@@ -1191,9 +1191,7 @@ crew_dispatch_validate() {
 # backstops for what this cannot see. Never reads or writes another home.
 backlog_record_reconcile() {
   local marker meta meta_lock id row label has_record=0 gate_status
-  # `ship` stands for "any backlog-tracked kind" in this gate: the per-record
-  # loop below still skips secondmates individually.
-  if fm_backlog_transition_applies "$CONFIG" "$DATA" ship; then
+  if fm_backlog_transition_applies "$CONFIG" "$DATA" "$BOOTSTRAP_BACKLOG_GATE_KIND"; then
     :
   else
     gate_status=$?
@@ -1295,7 +1293,23 @@ fi
 # runnable. Detect-only sessions never touch state, and the deferred network pass
 # never repeats it: the local pass that ran first already closed that window.
 if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ] && local_phase; then
-  if fm_backlog_transition_applies "$CONFIG" "$DATA" ship; then
+  BOOTSTRAP_BACKLOG_GATE_KIND=secondmate
+  for BOOTSTRAP_BACKLOG_MARKER in "$STATE"/*.backlog-close; do
+    [ -e "$BOOTSTRAP_BACKLOG_MARKER" ] || continue
+    BOOTSTRAP_BACKLOG_GATE_KIND=ship
+    break
+  done
+  if [ "$BOOTSTRAP_BACKLOG_GATE_KIND" = secondmate ]; then
+    for BOOTSTRAP_BACKLOG_META in "$STATE"/*.meta; do
+      [ -f "$BOOTSTRAP_BACKLOG_META" ] || continue
+      if [ "$(fm_meta_get "$BOOTSTRAP_BACKLOG_META" kind)" != secondmate ] \
+         && [ "$(fm_meta_get "$BOOTSTRAP_BACKLOG_META" cleanup_recovery)" != orca ]; then
+        BOOTSTRAP_BACKLOG_GATE_KIND=ship
+        break
+      fi
+    done
+  fi
+  if fm_backlog_transition_applies "$CONFIG" "$DATA" "$BOOTSTRAP_BACKLOG_GATE_KIND"; then
     :
   else
     BOOTSTRAP_BACKLOG_GATE_STATUS=$?

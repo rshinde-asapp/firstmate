@@ -371,6 +371,28 @@ test_completion_targets_a_nested_relative_data_directory() {
   pass "completion targets nested relative data from the caller directory"
 }
 
+test_immediate_child_absolute_data_dispatches_and_completes() {
+  local case_dir id data backlog out
+  id=atomic-immediate-child-data-b2
+  case_dir=$(make_home immediate-child-data "$id")
+  data="$case_dir/fm-records"
+  mv "$(home_of "$case_dir")/data" "$data"
+  backlog="$data/backlog.md"
+  tasks-axi add "$id" "item for $id" --kind ship --file "$backlog" >/dev/null
+
+  out=$(FM_DATA_OVERRIDE="$data" run_ship_spawn "$case_dir" "$id") \
+    || fail "immediate-child-data spawn failed: $out"
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = in_flight ] \
+    || fail "immediate-child absolute dispatch mutated a different backlog"
+  rm -f "$(home_of "$case_dir")/state/$id.meta"
+  write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-immediate-child"
+  out=$(FM_DATA_OVERRIDE="$data" run_teardown "$case_dir" "$id") \
+    || fail "immediate-child-data teardown failed: $out"
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+    || fail "immediate-child absolute completion mutated a different backlog"
+  pass "an immediate-child absolute data path keeps one paired backlog"
+}
+
 test_bare_relative_data_dispatches_and_completes() {
   local case_dir id data backlog out
   id=atomic-bare-relative-data-b2
@@ -1032,7 +1054,7 @@ test_bootstrap_stops_when_data_disappears_before_reconciliation() {
 }
 
 test_bootstrap_addressing_exemptions_remain_nonfatal() {
-  local manual_case no_backlog_case out
+  local manual_case no_backlog_case secondmate_case secondmate_id out
   manual_case=$(make_home bootstrap-manual-exempt)
   printf '%s\n' manual > "$(home_of "$manual_case")/config/backlog-backend"
   mv "$(home_of "$manual_case")/data" "$manual_case/manual-data"
@@ -1043,7 +1065,17 @@ test_bootstrap_addressing_exemptions_remain_nonfatal() {
   rm -f "$(backlog_of "$no_backlog_case")"
   out=$(run_bootstrap "$no_backlog_case") \
     || fail "no-backlog bootstrap exemption became fatal: $out"
-  pass "bootstrap preserves manual and absent-backlog exemptions"
+
+  secondmate_id=atomic-bootstrap-secondmate-exempt-b11
+  secondmate_case=$(make_home bootstrap-secondmate-exempt)
+  write_task_meta "$secondmate_case" "$secondmate_id" secondmate '' \
+    "spawn_gen=spawn-secondmate-exempt"
+  mv "$(home_of "$secondmate_case")/data" "$secondmate_case/secondmate-data"
+  out=$(run_bootstrap "$secondmate_case") \
+    || fail "secondmate bootstrap exemption became fatal: $out"
+  assert_present "$(home_of "$secondmate_case")/state/$secondmate_id.meta" \
+    "secondmate bootstrap exemption removed the persistent agent record"
+  pass "bootstrap preserves secondmate, manual, and absent-backlog exemptions"
 }
 
 test_recovery_leaves_a_captain_held_item_alone() {
@@ -1144,6 +1176,7 @@ test_dispatch_moves_the_item_in_flight_in_the_same_run
 test_dispatch_reads_the_row_from_the_backlog_root
 test_recovery_uses_the_parent_of_a_trailing_slash_data_record
 test_completion_targets_a_nested_relative_data_directory
+test_immediate_child_absolute_data_dispatches_and_completes
 test_bare_relative_data_dispatches_and_completes
 test_dispatch_refuses_an_unresolvable_data_directory
 test_completion_refuses_an_unresolvable_data_directory
