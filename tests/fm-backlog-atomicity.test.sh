@@ -338,7 +338,7 @@ test_recovery_uses_the_parent_of_a_trailing_slash_data_record() {
   require_show_cwd "$case_dir" "$(cd "$case_dir" && pwd -P)"
 
   out=$(run_bootstrap "$case_dir")
-  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = "done" ] \
     || fail "relocated-data recovery used the wrong addressing root: $out"
   assert_absent "$marker" "relocated-data recovery retained its close marker"
   pass "recovery uses the parent of a trailing-slash data record"
@@ -362,7 +362,7 @@ test_completion_targets_a_nested_relative_data_directory() {
     FM_DATA_OVERRIDE="$relative_data" PATH="$case_dir/fakebin:$PATH" \
     "$TEARDOWN" "$id" 2>&1) \
     || fail "relative-data teardown failed: $out"
-  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = "done" ] \
     || fail "relative-data teardown mutated a different backlog file"
   assert_absent "$(home_of "$case_dir")/state/$id.meta" \
     "relative-data teardown retained its task record"
@@ -388,7 +388,7 @@ test_immediate_child_absolute_data_dispatches_and_completes() {
   write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-immediate-child"
   out=$(FM_DATA_OVERRIDE="$data" run_teardown "$case_dir" "$id") \
     || fail "immediate-child-data teardown failed: $out"
-  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = "done" ] \
     || fail "immediate-child absolute completion mutated a different backlog"
   pass "an immediate-child absolute data path keeps one paired backlog"
 }
@@ -410,7 +410,7 @@ test_bare_relative_data_dispatches_and_completes() {
   write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-bare-relative"
   out=$(cd "$case_dir" && FM_DATA_OVERRIDE=records run_teardown "$case_dir" "$id") \
     || fail "bare-relative-data teardown failed: $out"
-  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = "done" ] \
     || fail "bare relative completion mutated a different backlog"
   pass "bare relative data addresses one backlog through dispatch and completion"
 }
@@ -745,7 +745,7 @@ test_completion_records_a_relative_report_for_relocated_data() {
 
   out=$(FM_DATA_OVERRIDE="$relocated////" run_teardown "$case_dir" "$id") \
     || fail "relocated scout teardown failed: $out"
-  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = "done" ] \
     || fail "relocated scout backlog row was not closed"
   assert_grep "data/$id/report.md" "$backlog" \
     "relocated scout close did not record a relative report path"
@@ -807,7 +807,7 @@ test_completion_fails_when_its_close_marker_cannot_be_removed() {
   assert_contains "$out" "pending-close record could not be removed" \
     "teardown did not report its incomplete marker cleanup"
   assert_present "$marker" "teardown hid a close-marker removal failure"
-  [ "$(row_state "$case_dir" "$id")" = done ] \
+  [ "$(row_state "$case_dir" "$id")" = "done" ] \
     || fail "marker cleanup failure lost the completed backlog transition"
   pass "completion reports failure until its durable close marker is removed"
 }
@@ -829,7 +829,7 @@ test_recovery_retries_when_a_close_marker_cannot_be_removed() {
   assert_contains "$out" "pending-close record could not be removed" \
     "session start did not report close-marker removal failure"
   assert_present "$marker" "recovery hid a close-marker removal failure"
-  [ "$(row_state "$case_dir" "$id")" = done ] \
+  [ "$(row_state "$case_dir" "$id")" = "done" ] \
     || fail "recovery did not land the close before marker cleanup"
 
   rm -f "$case_dir/fakebin/rm"
