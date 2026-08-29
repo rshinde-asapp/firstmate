@@ -184,7 +184,8 @@ write_meta() {
     "worktree=$case_dir/wt" \
     "project=$case_dir/project" \
     "kind=$kind" \
-    "mode=$mode"
+    "mode=$mode" \
+    "spawn_gen=teardown-test-task-x1"
 }
 
 # Commit something on the worktree's task branch. Args: case_dir [message]

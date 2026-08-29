@@ -270,6 +270,16 @@ META_LOCK=$(fm_meta_lock_path "$META") || exit 1
 fm_lock_acquire_wait "$META_LOCK"
 META_LOCK_HELD=1
 [ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
+TEARDOWN_META_KIND=$(fm_meta_get "$META" kind)
+[ -n "$TEARDOWN_META_KIND" ] || TEARDOWN_META_KIND=ship
+TEARDOWN_CLEANUP_RECOVERY=$(fm_meta_get "$META" cleanup_recovery)
+TEARDOWN_META_SPAWN_GEN=$(fm_meta_get "$META" spawn_gen)
+if [ "$TEARDOWN_CLEANUP_RECOVERY" != orca ] \
+   && fm_backlog_transition_applies "$CONFIG" "$DATA" "$TEARDOWN_META_KIND" \
+   && [ -z "$TEARDOWN_META_SPAWN_GEN" ]; then
+  echo "error: task $ID's record has no spawn_gen; refusing automatic teardown because a durable backlog close cannot identify this incarnation - relaunch the task to publish an incarnation, then retry teardown" >&2
+  exit 1
+fi
 
 REMOTE_HANDOFF_DIR_PRESENT=0
 REMOTE_HANDOFF_DIR_REAL=
@@ -706,10 +716,9 @@ if [ -z "$BUSY_GEN" ]; then
 fi
 ORCA_WORKTREE_ID=$(fm_meta_get "$META" orca_worktree_id)
 ORCA_PATH_MATCH_VERIFIED=0
-CLEANUP_RECOVERY=$(fm_meta_get "$META" cleanup_recovery)
+CLEANUP_RECOVERY=$TEARDOWN_CLEANUP_RECOVERY
 
-KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
-[ -n "$KIND" ] || KIND=ship
+KIND=$TEARDOWN_META_KIND
 MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
 PUBLIC_FOLLOWUP_HOME=$FM_HOME
@@ -2850,7 +2859,7 @@ if [ "$CLEANUP_RECOVERY" != orca ] \
    && fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
   BACKLOG_CLOSED=1
   backlog_done_args
-  META_SPAWN_GEN=$(fm_meta_get "$META" spawn_gen)
+  META_SPAWN_GEN=$TEARDOWN_META_SPAWN_GEN
   fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$META_SPAWN_GEN" \
     "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}" \
     || { echo "error: the pending backlog close for $ID could not be recorded; retaining every durable task record" >&2; exit 1; }

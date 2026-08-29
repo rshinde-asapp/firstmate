@@ -535,7 +535,7 @@ test_completion_closes_a_local_only_ship_before_reporting_success() {
   case_dir=$(make_home close-local-only)
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
-  write_task_meta "$case_dir" "$id" ship local-only
+  write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-close-local"
 
   out=$(run_teardown "$case_dir" "$id") || fail "teardown failed: $out"
   [ "$(row_state "$case_dir" "$id")" = "done" ] \
@@ -551,7 +551,7 @@ test_completion_closes_a_scout_with_its_report() {
   case_dir=$(make_home close-scout)
   add_item "$case_dir" "$id" scout
   start_item "$case_dir" "$id"
-  write_task_meta "$case_dir" "$id" scout ''
+  write_task_meta "$case_dir" "$id" scout '' "spawn_gen=spawn-close-scout"
   # A scout's deliverable is its report, and teardown also enforces the shared
   # captain-call completion gate; satisfy both the way a real scout does.
   mkdir -p "$(home_of "$case_dir")/data/$id"
@@ -567,6 +567,54 @@ test_completion_closes_a_scout_with_its_report() {
   assert_grep "data/$id/report.md" "$(backlog_of "$case_dir")" \
     "a closed scout item did not record its report"
   pass "completion closes a scout item against its report"
+}
+
+test_completion_refuses_a_legacy_record_without_an_incarnation() {
+  local case_dir id meta out rc=0
+  id=atomic-close-legacy-no-incarnation-b7
+  case_dir=$(make_home close-legacy-no-incarnation)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship local-only
+  meta="$(home_of "$case_dir")/state/$id.meta"
+
+  out=$(run_teardown "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "teardown accepted a record with no durable incarnation"
+  assert_contains "$out" "record has no spawn_gen" \
+    "teardown did not explain why the legacy record cannot close automatically"
+  assert_present "$meta" "legacy-record refusal removed the task record"
+  assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "legacy-record refusal wrote an unrecoverable close marker"
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] \
+    || fail "legacy-record refusal changed the backlog row"
+  pass "completion leaves legacy records open when no incarnation can be recorded"
+}
+
+test_completion_records_a_relative_report_for_relocated_data() {
+  local case_dir id relocated backlog out
+  id=atomic-close-relocated-scout-b7
+  case_dir=$(make_home close-relocated-scout)
+  relocated="$case_dir/relocated/data"
+  mkdir -p "$case_dir/relocated"
+  mv "$(home_of "$case_dir")/data" "$relocated"
+  backlog="$relocated/backlog.md"
+  tasks-axi add "$id" "item for $id" --kind scout --file "$backlog" >/dev/null
+  tasks-axi start "$id" --file "$backlog" >/dev/null
+  write_task_meta "$case_dir" "$id" scout '' "spawn_gen=spawn-relocated-scout"
+  mkdir -p "$relocated/$id"
+  printf 'findings\n' > "$relocated/$id/report.md"
+  FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$(home_of "$case_dir")" \
+    FM_DATA_OVERRIDE="$relocated/" PATH="$case_dir/fakebin:$PATH" \
+    "$ROOT/bin/fm-captain-hold.sh" complete "$id" --none >/dev/null \
+    || fail "could not record the relocated scout's captain-call inventory"
+
+  out=$(FM_DATA_OVERRIDE="$relocated/" run_teardown "$case_dir" "$id") \
+    || fail "relocated scout teardown failed: $out"
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+    || fail "relocated scout backlog row was not closed"
+  assert_grep "data/$id/report.md" "$backlog" \
+    "relocated scout close did not record a relative report path"
+  pass "completion records relocated scout reports relative to the backlog root"
 }
 
 test_completion_preserves_records_when_meta_removal_fails() {
@@ -597,7 +645,7 @@ test_completion_fails_loudly_and_records_the_close_it_still_owes() {
   case_dir=$(make_home close-fails)
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
-  write_task_meta "$case_dir" "$id" ship local-only
+  write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-close-fails"
   break_verb "$case_dir" "done"
 
   out=$(run_teardown "$case_dir" "$id") || rc=$?
@@ -615,7 +663,7 @@ test_completion_fails_when_its_close_marker_cannot_be_removed() {
   case_dir=$(make_home close-marker-remove-failure)
   add_item "$case_dir" "$id"
   start_item "$case_dir" "$id"
-  write_task_meta "$case_dir" "$id" ship local-only
+  write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-marker-fails"
   marker="$(home_of "$case_dir")/state/$id.backlog-close"
   break_meta_removal "$case_dir" "$marker"
 
@@ -901,7 +949,7 @@ test_a_secondmate_home_keeps_its_own_books() {
     || fail "a mate's own dispatch left its item at $(row_state "$case_dir" "$id")"
 
   rm -f "$(home_of "$case_dir")/state/$id.meta"
-  write_task_meta "$case_dir" "$id" ship local-only
+  write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-mate-close"
   out=$(run_teardown "$case_dir" "$id") || fail "mate-home teardown failed: $out"
   [ "$(row_state "$case_dir" "$id")" = "done" ] \
     || fail "a mate's own completion left its item at $(row_state "$case_dir" "$id")"
@@ -943,6 +991,8 @@ test_dispatch_does_not_resurrect_a_row_closed_after_preflight
 test_dispatch_fails_when_its_row_vanishes_after_preflight
 test_completion_closes_a_local_only_ship_before_reporting_success
 test_completion_closes_a_scout_with_its_report
+test_completion_refuses_a_legacy_record_without_an_incarnation
+test_completion_records_a_relative_report_for_relocated_data
 test_completion_preserves_records_when_meta_removal_fails
 test_completion_fails_loudly_and_records_the_close_it_still_owes
 test_completion_fails_when_its_close_marker_cannot_be_removed

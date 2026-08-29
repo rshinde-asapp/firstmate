@@ -74,8 +74,15 @@ fm_backlog_root() {  # <data-dir>
 }
 
 fm_backlog_data_relative() {  # <data-dir>
-  local data=${1%/} root
+  local data=$1 root
+  while [ "$data" != / ] && [ "${data%/}" != "$data" ]; do
+    data=${data%/}
+  done
   root=$(fm_backlog_root "$data") || return 1
+  if [ "$root" = / ]; then
+    printf '%s\n' "${data#/}"
+    return 0
+  fi
   case "$data" in
     "$root"/*) printf '%s\n' "${data#"$root"/}" ;;
     *) printf '%s\n' "$data" ;;
