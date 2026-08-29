@@ -67,7 +67,11 @@ fm_backlog_file() {  # <data-dir>
     FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $1"
     return 1
   }
-  printf '%s/backlog.md\n' "$data"
+  if [ "$data" = / ]; then
+    printf '/backlog.md\n'
+  else
+    printf '%s/backlog.md\n' "$data"
+  fi
 }
 
 # The directory a backlog's own `.tasks.toml` is resolved from.
@@ -77,9 +81,6 @@ fm_backlog_root() {  # <data-dir>
     FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $1"
     return 1
   }
-  while [ "$data" != / ] && [ "${data%/}" != "$data" ]; do
-    data=${data%/}
-  done
   case "$data" in
     */*)
       parent=${data%/*}
@@ -96,10 +97,11 @@ fm_backlog_data_relative() {  # <data-dir>
     FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $1"
     return 1
   }
-  while [ "$data" != / ] && [ "${data%/}" != "$data" ]; do
-    data=${data%/}
-  done
   root=$(fm_backlog_root "$data") || return 1
+  if [ "$data" = "$root" ]; then
+    printf '.\n'
+    return 0
+  fi
   if [ "$root" = / ]; then
     printf '%s\n' "${data#/}"
     return 0

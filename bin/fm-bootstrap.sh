@@ -1306,7 +1306,14 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ] && local_phase; then
   fi
   "$SCRIPT_DIR/fm-pr-check-migrate.sh" || true
   startup_memory_budget_setup
-  backlog_record_reconcile
+  if backlog_record_reconcile; then
+    :
+  else
+    BOOTSTRAP_BACKLOG_RECONCILE_STATUS=$?
+    if [ "$BOOTSTRAP_BACKLOG_RECONCILE_STATUS" -eq 2 ]; then
+      exit 1
+    fi
+  fi
 fi
 
 # Local detection: presence, version floors, and configuration. Nothing here

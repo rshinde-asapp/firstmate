@@ -210,6 +210,26 @@ SH
   chmod +x "$case_dir/fakebin/rm"
 }
 
+remove_data_during_startup_budget_check() {  # <case-dir>
+  local case_dir=$1 real data saved budget
+  real=$(command -v stat)
+  data="$(home_of "$case_dir")/data"
+  saved="$case_dir/bootstrap-data"
+  budget="$(home_of "$case_dir")/config/startup-memory-budget"
+  printf '7500\n' > "$budget"
+  cat > "$case_dir/fakebin/stat" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [ "\$arg" = "$budget" ] && [ ! -e "$case_dir/data-removed" ]; then
+    mv "$data" "$saved" || exit 1
+    : > "$case_dir/data-removed"
+  fi
+done
+exec "$real" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/stat"
+}
+
 break_meta_publication() {  # <case-dir> <meta-path>
   local case_dir=$1 meta=$2 real
   real=$(command -v mv)
@@ -349,6 +369,28 @@ test_completion_targets_a_nested_relative_data_directory() {
   assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
     "relative-data teardown retained its close marker"
   pass "completion targets nested relative data from the caller directory"
+}
+
+test_bare_relative_data_dispatches_and_completes() {
+  local case_dir id data backlog out
+  id=atomic-bare-relative-data-b2
+  case_dir=$(make_home bare-relative-data "$id")
+  data="$case_dir/records"
+  mv "$(home_of "$case_dir")/data" "$data"
+  backlog="$data/backlog.md"
+  tasks-axi add "$id" "item for $id" --kind ship --file "$backlog" >/dev/null
+
+  out=$(cd "$case_dir" && FM_DATA_OVERRIDE=records run_ship_spawn "$case_dir" "$id") \
+    || fail "bare-relative-data spawn failed: $out"
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = in_flight ] \
+    || fail "bare relative dispatch mutated a different backlog"
+  rm -f "$(home_of "$case_dir")/state/$id.meta"
+  write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-bare-relative"
+  out=$(cd "$case_dir" && FM_DATA_OVERRIDE=records run_teardown "$case_dir" "$id") \
+    || fail "bare-relative-data teardown failed: $out"
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+    || fail "bare relative completion mutated a different backlog"
+  pass "bare relative data addresses one backlog through dispatch and completion"
 }
 
 test_dispatch_refuses_an_unresolvable_data_directory() {
@@ -675,11 +717,11 @@ test_completion_records_a_relative_report_for_relocated_data() {
   mkdir -p "$relocated/$id"
   printf 'findings\n' > "$relocated/$id/report.md"
   FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$(home_of "$case_dir")" \
-    FM_DATA_OVERRIDE="$relocated/" PATH="$case_dir/fakebin:$PATH" \
+    FM_DATA_OVERRIDE="$relocated////" PATH="$case_dir/fakebin:$PATH" \
     "$ROOT/bin/fm-captain-hold.sh" complete "$id" --none >/dev/null \
     || fail "could not record the relocated scout's captain-call inventory"
 
-  out=$(FM_DATA_OVERRIDE="$relocated/" run_teardown "$case_dir" "$id") \
+  out=$(FM_DATA_OVERRIDE="$relocated////" run_teardown "$case_dir" "$id") \
     || fail "relocated scout teardown failed: $out"
   [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
     || fail "relocated scout backlog row was not closed"
@@ -970,6 +1012,40 @@ test_recovery_drops_a_legacy_close_when_meta_exists() {
   pass "session start treats an unversioned close as stale when meta exists"
 }
 
+test_bootstrap_stops_when_data_disappears_before_reconciliation() {
+  local case_dir id saved out rc=0
+  id=atomic-bootstrap-data-race-b11
+  case_dir=$(make_home bootstrap-data-race)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship no-mistakes "spawn_gen=spawn-bootstrap-race"
+  remove_data_during_startup_budget_check "$case_dir"
+  saved="$case_dir/bootstrap-data"
+
+  out=$(run_bootstrap "$case_dir") || rc=$?
+  [ "$rc" -ne 0 ] || fail "bootstrap absorbed a fatal reconciliation addressing error: $out"
+  assert_present "$(home_of "$case_dir")/state/$id.meta" \
+    "fatal bootstrap reconciliation removed the task record"
+  [ "$(tasks-axi show "$id" --file "$saved/backlog.md" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = in_flight ] \
+    || fail "fatal bootstrap reconciliation changed the backlog row"
+  pass "bootstrap stops when backlog data disappears before reconciliation"
+}
+
+test_bootstrap_addressing_exemptions_remain_nonfatal() {
+  local manual_case no_backlog_case out
+  manual_case=$(make_home bootstrap-manual-exempt)
+  printf '%s\n' manual > "$(home_of "$manual_case")/config/backlog-backend"
+  mv "$(home_of "$manual_case")/data" "$manual_case/manual-data"
+  out=$(run_bootstrap "$manual_case") \
+    || fail "manual bootstrap exemption became fatal: $out"
+
+  no_backlog_case=$(make_home bootstrap-no-backlog-exempt)
+  rm -f "$(backlog_of "$no_backlog_case")"
+  out=$(run_bootstrap "$no_backlog_case") \
+    || fail "no-backlog bootstrap exemption became fatal: $out"
+  pass "bootstrap preserves manual and absent-backlog exemptions"
+}
+
 test_recovery_leaves_a_captain_held_item_alone() {
   local case_dir id out
   id=atomic-heal-b11
@@ -1068,6 +1144,7 @@ test_dispatch_moves_the_item_in_flight_in_the_same_run
 test_dispatch_reads_the_row_from_the_backlog_root
 test_recovery_uses_the_parent_of_a_trailing_slash_data_record
 test_completion_targets_a_nested_relative_data_directory
+test_bare_relative_data_dispatches_and_completes
 test_dispatch_refuses_an_unresolvable_data_directory
 test_completion_refuses_an_unresolvable_data_directory
 test_dispatch_refuses_an_id_this_home_has_no_item_for
@@ -1098,6 +1175,8 @@ test_recovery_finishes_a_close_for_the_same_meta_incarnation
 test_recovery_preserves_both_records_when_meta_removal_fails
 test_recovery_drops_a_close_for_a_newer_meta_incarnation
 test_recovery_drops_a_legacy_close_when_meta_exists
+test_bootstrap_stops_when_data_disappears_before_reconciliation
+test_bootstrap_addressing_exemptions_remain_nonfatal
 test_recovery_leaves_a_captain_held_item_alone
 test_home_without_a_backlog_dispatches_and_completes
 test_manual_backend_home_dispatches_and_completes_without_touching_the_backlog
