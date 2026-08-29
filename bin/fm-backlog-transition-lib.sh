@@ -21,8 +21,8 @@
 # secondmates (persistent agents are never backlog items, AGENTS.md section 10),
 # homes whose configured backlog backend is manual or whose tasks-axi is not
 # compatible (bin/fm-tasks-axi-lib.sh), and homes that keep no backlog file at
-# all. A skipped transition is never an error; the caller reports the manual
-# follow-up instead.
+# all. Those return-1 exemptions are never errors; an unresolvable configured
+# data directory instead returns 2 so callers refuse before mutation.
 #
 # ADDRESSING. Every call passes `--file <data>/backlog.md` so the mutation lands
 # in the home that owns the task regardless of the caller's working directory,
@@ -41,7 +41,7 @@
 # is idempotent. Spawn needs no marker: it publishes the meta first, so a crash
 # leaves the meta itself as the evidence that the row is owed a start.
 
-# Set by fm_backlog_transition_applies when it returns non-zero.
+# Set by fm_backlog_transition_applies for a return-1 exemption.
 # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
 FM_BACKLOG_TRANSITION_SKIP=
 # Set by the mutating helpers when they return non-zero.

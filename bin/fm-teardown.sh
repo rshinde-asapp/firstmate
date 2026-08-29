@@ -12,8 +12,8 @@
 # record being removed, the intended close is recorded in
 # state/<id>.backlog-close first, so a process killed between the halves leaves
 # the next session start enough to finish it; a landed close removes that record.
-# A close that fails is fatal and loud - the printed follow-up then names the
-# hand edit that is still owed. The transition is skipped on a
+# A close that fails is fatal and loud, preserves its pending-close record, and
+# is retried by the next session start. The transition is skipped on a
 # config/backlog-backend=manual home, without a compatible tasks-axi, and in a
 # home that keeps no data/backlog.md; those cases print the manual follow-up.
 # None of this loosens the landed-work gates below: the transition runs only on

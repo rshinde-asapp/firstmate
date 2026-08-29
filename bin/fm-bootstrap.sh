@@ -89,8 +89,8 @@
 #          marks In flight any item this home already owns a worker for. It
 #          never touches a captain-held or closed item, and never reads or
 #          writes another home; the fleet snapshot's classifier and
-#          bin/fm-secondmate-reconcile.sh's nudge stay as backstops. Successful
-#          reconciliations print BOOTSTRAP_INFO facts.
+#          bin/fm-secondmate-reconcile.sh's nudge stay as backstops. Replayed
+#          closes and restored In-flight rows print BOOTSTRAP_INFO facts.
 #          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the seven MUTATING sweeps
 #          (PR-check migration, backlog_record_reconcile, secondmate_sync,
 #          secondmate_liveness_sweep, secondmate_handoff_resume, x_mode_setup,

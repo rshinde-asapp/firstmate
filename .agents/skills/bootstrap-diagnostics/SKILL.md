@@ -54,6 +54,8 @@ When any diagnostic needs captain attention, report the plain consequence and re
   The endpoint and local copy are already gone; the task record is normally gone too, but remains paired with the marker when recovery could not remove it safely.
   Read the named reason, fix the record or backlog-file problem, and rerun session start so the same recorded close replays.
   Never hand-close the item by deleting `state/<id>.backlog-close` - that discards the completion link the cleanup captured.
+- `BACKLOG_RECONCILE: <id>: worker record exists but its backlog item could not be read: <reason>` - this home could not determine whether the item matches its worker record.
+  Resolve the named backlog read problem and rerun session start; never guess by starting or closing an unreadable item.
 - `BACKLOG_RECONCILE: <id>: worker record exists but its backlog item could not be moved to In flight: <reason>` - this home owns a worker whose backlog item is still queued, and the reconciliation could not correct it.
   Until it is corrected, the fleet view reads that worker as work no backlog item owns; resolve the named backlog problem and rerun session start.
 - `SECONDMATE_SYNC: secondmate <id>: skipped: <reason>` - secondmate convergence left a live home on its existing checkout because the home was dirty, diverged, unsafe, on the wrong branch, missing its placement-specific target commit, unreachable, or otherwise not fast-forwardable, or because inherited local-material propagation failed; bootstrap continued, but inspect the reason because the secondmate's tracked instructions, inherited settings, or shared captain preferences may be stale after a primary update.
