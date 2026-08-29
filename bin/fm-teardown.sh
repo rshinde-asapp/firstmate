@@ -274,9 +274,21 @@ TEARDOWN_META_KIND=$(fm_meta_get "$META" kind)
 [ -n "$TEARDOWN_META_KIND" ] || TEARDOWN_META_KIND=ship
 TEARDOWN_CLEANUP_RECOVERY=$(fm_meta_get "$META" cleanup_recovery)
 TEARDOWN_META_SPAWN_GEN=$(fm_meta_get "$META" spawn_gen)
-if [ "$TEARDOWN_CLEANUP_RECOVERY" != orca ] \
-   && fm_backlog_transition_applies "$CONFIG" "$DATA" "$TEARDOWN_META_KIND" \
-   && [ -z "$TEARDOWN_META_SPAWN_GEN" ]; then
+TEARDOWN_BACKLOG_APPLIES=0
+TEARDOWN_BACKLOG_SKIP_REASON=
+if [ "$TEARDOWN_CLEANUP_RECOVERY" != orca ]; then
+  if fm_backlog_transition_applies "$CONFIG" "$DATA" "$TEARDOWN_META_KIND"; then
+    TEARDOWN_BACKLOG_APPLIES=1
+  else
+    TEARDOWN_BACKLOG_GATE_STATUS=$?
+    if [ "$TEARDOWN_BACKLOG_GATE_STATUS" -eq 2 ]; then
+      echo "error: task $ID cannot be torn down because its backlog data directory is inaccessible: $DATA ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+      exit 1
+    fi
+    TEARDOWN_BACKLOG_SKIP_REASON=$FM_BACKLOG_TRANSITION_SKIP
+  fi
+fi
+if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ] && [ -z "$TEARDOWN_META_SPAWN_GEN" ]; then
   echo "error: task $ID's record has no spawn_gen; refusing automatic teardown because a durable backlog close cannot identify this incarnation - relaunch the task to publish an incarnation, then retry teardown" >&2
   exit 1
 fi
@@ -2855,8 +2867,7 @@ status_retire_presentation_task "$STATE" "$ID" || exit 1
 # for the next session start to finish it (bin/fm-backlog-transition-lib.sh).
 BACKLOG_CLOSED=0
 BACKLOG_SKIP_REASON=
-if [ "$CLEANUP_RECOVERY" != orca ] \
-   && fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
+if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
   BACKLOG_CLOSED=1
   backlog_done_args
   META_SPAWN_GEN=$TEARDOWN_META_SPAWN_GEN
@@ -2867,7 +2878,7 @@ else
   if [ "$CLEANUP_RECOVERY" = orca ]; then
     BACKLOG_SKIP_REASON="Orca cleanup recovery is not a launched backlog worker"
   else
-    BACKLOG_SKIP_REASON=$FM_BACKLOG_TRANSITION_SKIP
+    BACKLOG_SKIP_REASON=$TEARDOWN_BACKLOG_SKIP_REASON
   fi
 fi
 rm -f "$STATE/$ID.turn-ended" \

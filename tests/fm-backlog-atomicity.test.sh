@@ -351,6 +351,50 @@ test_completion_targets_a_nested_relative_data_directory() {
   pass "completion targets nested relative data from the caller directory"
 }
 
+test_dispatch_refuses_an_unresolvable_data_directory() {
+  local case_dir id saved out rc=0
+  id=atomic-dispatch-missing-data-b2
+  case_dir=$(make_home dispatch-missing-data "$id")
+  add_item "$case_dir" "$id"
+  saved="$case_dir/backlog-data"
+  mv "$(home_of "$case_dir")/data" "$saved"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "spawn succeeded with an unresolvable data directory"
+  assert_contains "$out" "task $id" \
+    "spawn did not identify the task blocked by fatal backlog addressing"
+  assert_contains "$out" "$(home_of "$case_dir")/data" \
+    "spawn did not identify the inaccessible data directory"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "fatal backlog addressing created a task record"
+  [ "$(tasks-axi show "$id" --file "$saved/backlog.md" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = queued ] \
+    || fail "fatal backlog addressing changed the queued row"
+  pass "dispatch refuses an unresolvable backlog data directory"
+}
+
+test_completion_refuses_an_unresolvable_data_directory() {
+  local case_dir id saved meta out rc=0
+  id=atomic-close-missing-data-b2
+  case_dir=$(make_home close-missing-data)
+  add_item "$case_dir" "$id"
+  start_item "$case_dir" "$id"
+  write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-missing-data"
+  meta="$(home_of "$case_dir")/state/$id.meta"
+  saved="$case_dir/backlog-data"
+  mv "$(home_of "$case_dir")/data" "$saved"
+
+  out=$(run_teardown "$case_dir" "$id") || rc=$?
+  [ "$rc" -ne 0 ] || fail "teardown succeeded with an unresolvable data directory"
+  assert_contains "$out" "task $id cannot be torn down" \
+    "teardown did not identify the task blocked by fatal backlog addressing"
+  assert_present "$meta" "fatal backlog addressing removed the task record"
+  assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "fatal backlog addressing wrote a close marker"
+  [ "$(tasks-axi show "$id" --file "$saved/backlog.md" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = in_flight ] \
+    || fail "fatal backlog addressing changed the In-flight row"
+  pass "completion refuses before mutation when backlog data is unresolvable"
+}
+
 test_dispatch_refuses_an_id_this_home_has_no_item_for() {
   local case_dir id out rc=0
   id=atomic-dispatch-b2
@@ -943,6 +987,23 @@ test_recovery_leaves_a_captain_held_item_alone() {
 
 # --- backend selection and secondmate scope ---------------------------------
 
+test_home_without_a_backlog_dispatches_and_completes() {
+  local case_dir id out
+  id=atomic-no-backlog-b12
+  case_dir=$(make_home no-backlog "$id")
+  rm -f "$(backlog_of "$case_dir")"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "no-backlog spawn failed: $out"
+  assert_present "$(home_of "$case_dir")/state/$id.meta" \
+    "no-backlog spawn did not publish its task record"
+  out=$(run_teardown "$case_dir" "$id") || fail "no-backlog teardown failed: $out"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "no-backlog teardown retained its task record"
+  assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "no-backlog teardown recorded a close marker"
+  pass "a home with no backlog remains exempt from lifecycle transitions"
+}
+
 test_manual_backend_home_dispatches_and_completes_without_touching_the_backlog() {
   local case_dir id out
   id=atomic-manual-b12
@@ -952,6 +1013,7 @@ test_manual_backend_home_dispatches_and_completes_without_touching_the_backlog()
   # so neither half of the lifecycle may hard-fail over its contents.
   out=$(run_ship_spawn "$case_dir" "$id") || fail "manual-backend spawn failed: $out"
   assert_contains "$out" "spawned $id" "manual-backend spawn did not report success"
+  mv "$(home_of "$case_dir")/data" "$case_dir/manual-data"
 
   out=$(run_teardown "$case_dir" "$id") || fail "manual-backend teardown failed: $out"
   assert_contains "$out" "Update data/backlog.md" \
@@ -1006,6 +1068,8 @@ test_dispatch_moves_the_item_in_flight_in_the_same_run
 test_dispatch_reads_the_row_from_the_backlog_root
 test_recovery_uses_the_parent_of_a_trailing_slash_data_record
 test_completion_targets_a_nested_relative_data_directory
+test_dispatch_refuses_an_unresolvable_data_directory
+test_completion_refuses_an_unresolvable_data_directory
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_reports_a_backlog_read_failure
 test_dispatch_refuses_a_closed_item
@@ -1035,6 +1099,7 @@ test_recovery_preserves_both_records_when_meta_removal_fails
 test_recovery_drops_a_close_for_a_newer_meta_incarnation
 test_recovery_drops_a_legacy_close_when_meta_exists
 test_recovery_leaves_a_captain_held_item_alone
+test_home_without_a_backlog_dispatches_and_completes
 test_manual_backend_home_dispatches_and_completes_without_touching_the_backlog
 test_a_secondmate_home_keeps_its_own_books
 test_a_persistent_secondmate_is_never_a_backlog_item

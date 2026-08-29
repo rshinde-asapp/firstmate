@@ -1708,7 +1708,7 @@ else
   WT=""
   BRIEF="$DATA/$ID/brief.md"
 fi
-[ -f "$BRIEF" ] || { echo "error: no brief at $BRIEF" >&2; exit 1; }
+[ -f "$BRIEF" ] || { echo "error: task $ID has no brief at inaccessible data path $BRIEF" >&2; exit 1; }
 
 delivery_rigor_rank() {  # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task mode
   case "$1" in
@@ -1981,6 +1981,12 @@ if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
       exit 1
       ;;
   esac
+else
+  BACKLOG_GATE_STATUS=$?
+  if [ "$BACKLOG_GATE_STATUS" -eq 2 ]; then
+    echo "error: task $ID cannot be dispatched because its backlog data directory is inaccessible: $DATA ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+    exit 1
+  fi
 fi
 
 W="fm-$ID"

@@ -112,12 +112,6 @@ fm_backlog_data_relative() {  # <data-dir>
 
 fm_backlog_transition_applies() {  # <config-dir> <data-dir> <kind>
   local config=$1 data kind=$3 file
-  if ! data=$(fm_backlog_data_absolute "$2"); then
-    FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $2"
-    FM_BACKLOG_TRANSITION_SKIP=$FM_BACKLOG_TRANSITION_ERROR
-    printf 'error: %s\n' "$FM_BACKLOG_TRANSITION_ERROR" >&2
-    return 2
-  fi
   FM_BACKLOG_TRANSITION_SKIP=
   if [ "$kind" = secondmate ]; then
     FM_BACKLOG_TRANSITION_SKIP="secondmates are not backlog items"
@@ -130,6 +124,10 @@ fm_backlog_transition_applies() {  # <config-dir> <data-dir> <kind>
   if ! fm_tasks_axi_compatible; then
     FM_BACKLOG_TRANSITION_SKIP="no compatible tasks-axi on PATH"
     return 1
+  fi
+  if ! data=$(fm_backlog_data_absolute "$2"); then
+    FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $2"
+    return 2
   fi
   file=$(fm_backlog_file "$data")
   if [ ! -f "$file" ]; then

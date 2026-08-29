@@ -1190,14 +1190,23 @@ crew_dispatch_validate() {
 # snapshot's classifier and bin/fm-secondmate-reconcile.sh's nudge stay as
 # backstops for what this cannot see. Never reads or writes another home.
 backlog_record_reconcile() {
-  local marker meta meta_lock id row label has_record=0
+  local marker meta meta_lock id row label has_record=0 gate_status
+  # `ship` stands for "any backlog-tracked kind" in this gate: the per-record
+  # loop below still skips secondmates individually.
+  if fm_backlog_transition_applies "$CONFIG" "$DATA" ship; then
+    :
+  else
+    gate_status=$?
+    if [ "$gate_status" -eq 2 ]; then
+      echo "error: backlog reconciliation cannot access configured data directory $DATA ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+      return 2
+    fi
+    return 0
+  fi
   # Keep the wake/lock library's source-time state-directory creation inside
   # this mutating sweep, so FM_BOOTSTRAP_DETECT_ONLY remains read-only.
   # shellcheck source=bin/fm-wake-lib.sh disable=SC1091
   . "$SCRIPT_DIR/fm-wake-lib.sh"
-  # `ship` stands for "any backlog-tracked kind" in this gate: the per-record
-  # loop below still skips secondmates individually.
-  fm_backlog_transition_applies "$CONFIG" "$DATA" ship || return 0
 
   # Finish any close an interrupted cleanup recorded but never landed.
   for marker in "$STATE"/*.backlog-close; do
@@ -1286,6 +1295,15 @@ fi
 # runnable. Detect-only sessions never touch state, and the deferred network pass
 # never repeats it: the local pass that ran first already closed that window.
 if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ] && local_phase; then
+  if fm_backlog_transition_applies "$CONFIG" "$DATA" ship; then
+    :
+  else
+    BOOTSTRAP_BACKLOG_GATE_STATUS=$?
+    if [ "$BOOTSTRAP_BACKLOG_GATE_STATUS" -eq 2 ]; then
+      echo "error: bootstrap cannot access configured backlog data directory $DATA ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+      exit 1
+    fi
+  fi
   "$SCRIPT_DIR/fm-pr-check-migrate.sh" || true
   startup_memory_budget_setup
   backlog_record_reconcile
