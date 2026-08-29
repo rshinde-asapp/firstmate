@@ -91,6 +91,20 @@ row_state() {  # <case-dir> <id>
 # Shadow tasks-axi with a wrapper that fails one verb and delegates every other
 # verb to the real binary, so a test can drive a genuine mid-transition failure
 # without faking the reads around it.
+require_show_cwd() {  # <case-dir> <expected-dir>
+  local case_dir=$1 expected=$2 real
+  real=$(command -v tasks-axi)
+  cat > "$case_dir/fakebin/tasks-axi" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = show ] && [ "\$PWD" != "$expected" ]; then
+  echo "error: wrong tasks root: \$PWD" >&2
+  exit 1
+fi
+exec "$real" "\$@"
+SH
+  chmod +x "$case_dir/fakebin/tasks-axi"
+}
+
 break_verb() {  # <case-dir> <verb>
   local case_dir=$1 verb=$2 real
   real=$(command -v tasks-axi)
@@ -268,6 +282,21 @@ test_dispatch_moves_the_item_in_flight_in_the_same_run() {
   [ "$(row_state "$case_dir" "$id")" = in_flight ] \
     || fail "spawn reported success with its backlog item still $(row_state "$case_dir" "$id")"
   pass "dispatch publishes the record and moves the backlog item In flight in one run"
+}
+
+test_dispatch_reads_the_row_from_the_backlog_root() {
+  local case_dir id out
+  id=atomic-dispatch-root-b2
+  case_dir=$(make_home dispatch-root "$id")
+  add_item "$case_dir" "$id"
+  require_show_cwd "$case_dir" "$(home_of "$case_dir" | sed 's://*:/:g')"
+
+  out=$(run_ship_spawn "$case_dir" "$id") || fail "spawn read outside the backlog root: $out"
+  [ "$(row_state "$case_dir" "$id")" = in_flight ] \
+    || fail "root-addressed dispatch left the backlog row queued"
+  assert_present "$(home_of "$case_dir")/state/$id.meta" \
+    "root-addressed dispatch did not publish its task record"
+  pass "dispatch reads backlog rows from the backlog addressing root"
 }
 
 test_dispatch_refuses_an_id_this_home_has_no_item_for() {
@@ -874,6 +903,7 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
 }
 
 test_dispatch_moves_the_item_in_flight_in_the_same_run
+test_dispatch_reads_the_row_from_the_backlog_root
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_reports_a_backlog_read_failure
 test_dispatch_refuses_a_closed_item

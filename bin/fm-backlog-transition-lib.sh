@@ -102,7 +102,8 @@ fm_backlog_row_probe() {  # <data-dir> <id>
   FM_BACKLOG_ROW_RESULT=error
   FM_BACKLOG_ROW_STATE=
   FM_BACKLOG_ROW_ERROR=
-  out=$(tasks-axi show "$id" --file "$(fm_backlog_file "$data")" 2>&1)
+  out=$(cd "$(fm_backlog_root "$data")" 2>/dev/null && tasks-axi show "$id" \
+      --file "$(fm_backlog_file "$data")" 2>&1)
   command_status=$?
   if [ "$command_status" -ne 0 ]; then
     if printf '%s\n' "$out" | grep -q '^code: NOT_FOUND$'; then
