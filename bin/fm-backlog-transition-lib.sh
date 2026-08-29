@@ -53,13 +53,30 @@ FM_BACKLOG_ROW_ERROR=
 # shellcheck disable=SC2034 # Output global, read by the sourcing caller.
 FM_BACKLOG_CLOSE_REPLAY_RESULT=
 
+fm_backlog_data_absolute() {
+  local data=$1
+  if ! data=$(CDPATH='' cd -- "$data" 2>/dev/null && pwd -P); then
+    return 1
+  fi
+  printf '%s\n' "$data"
+}
+
 fm_backlog_file() {  # <data-dir>
-  printf '%s/backlog.md\n' "$1"
+  local data
+  data=$(fm_backlog_data_absolute "$1") || {
+    FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $1"
+    return 1
+  }
+  printf '%s/backlog.md\n' "$data"
 }
 
 # The directory a backlog's own `.tasks.toml` is resolved from.
 fm_backlog_root() {  # <data-dir>
-  local data=$1 parent
+  local data parent
+  data=$(fm_backlog_data_absolute "$1") || {
+    FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $1"
+    return 1
+  }
   while [ "$data" != / ] && [ "${data%/}" != "$data" ]; do
     data=${data%/}
   done
@@ -74,7 +91,11 @@ fm_backlog_root() {  # <data-dir>
 }
 
 fm_backlog_data_relative() {  # <data-dir>
-  local data=$1 root
+  local data root
+  data=$(fm_backlog_data_absolute "$1") || {
+    FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $1"
+    return 1
+  }
   while [ "$data" != / ] && [ "${data%/}" != "$data" ]; do
     data=${data%/}
   done
@@ -90,7 +111,13 @@ fm_backlog_data_relative() {  # <data-dir>
 }
 
 fm_backlog_transition_applies() {  # <config-dir> <data-dir> <kind>
-  local config=$1 data=$2 kind=$3 file
+  local config=$1 data kind=$3 file
+  if ! data=$(fm_backlog_data_absolute "$2"); then
+    FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $2"
+    FM_BACKLOG_TRANSITION_SKIP=$FM_BACKLOG_TRANSITION_ERROR
+    printf 'error: %s\n' "$FM_BACKLOG_TRANSITION_ERROR" >&2
+    return 2
+  fi
   FM_BACKLOG_TRANSITION_SKIP=
   if [ "$kind" = secondmate ]; then
     FM_BACKLOG_TRANSITION_SKIP="secondmates are not backlog items"
@@ -113,7 +140,13 @@ fm_backlog_transition_applies() {  # <config-dir> <data-dir> <kind>
 }
 
 fm_backlog_row_probe() {  # <data-dir> <id>
-  local data=$1 id=$2 out state held command_status
+  local data id=$2 out state held command_status
+  if ! data=$(fm_backlog_data_absolute "$1"); then
+    FM_BACKLOG_ROW_RESULT=error
+    FM_BACKLOG_ROW_STATE=
+    FM_BACKLOG_ROW_ERROR="data directory cannot be resolved: $1"
+    return 1
+  fi
   FM_BACKLOG_ROW_RESULT=error
   FM_BACKLOG_ROW_STATE=
   FM_BACKLOG_ROW_ERROR=
@@ -151,7 +184,11 @@ fm_backlog_row_state() {  # <data-dir> <id>
 # Run one tasks-axi mutation against <home>'s backlog, capturing its first
 # output line in FM_BACKLOG_TRANSITION_ERROR on failure.
 fm_backlog_mutate() {  # <data-dir> <verb> <id> [flag...]
-  local data=$1 verb=$2 id=$3 out command_status
+  local data verb=$2 id=$3 out command_status
+  if ! data=$(fm_backlog_data_absolute "$1"); then
+    FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $1"
+    return 1
+  fi
   shift 3
   FM_BACKLOG_TRANSITION_ERROR=
   out=$(cd "$(fm_backlog_root "$data")" 2>/dev/null && tasks-axi "$verb" "$id" \
@@ -272,7 +309,11 @@ fm_backlog_close_marker_path() {  # <state-dir> <id>
 # Record the exact close a teardown is about to perform. Refuses an argument
 # carrying a newline rather than writing a record that cannot be read back.
 fm_backlog_close_marker_write() {  # <state-dir> <id> <data-dir> <spawn-gen> [flag...]
-  local state=$1 id=$2 data=$3 spawn_gen=$4 marker tmp arg
+  local state=$1 id=$2 data spawn_gen=$4 marker tmp arg
+  if ! data=$(fm_backlog_data_absolute "$3"); then
+    FM_BACKLOG_TRANSITION_ERROR="data directory cannot be resolved: $3"
+    return 1
+  fi
   shift 4
   marker=$(fm_backlog_close_marker_path "$state" "$id") || return 1
   tmp="$state/.$id.backlog-close.${BASHPID:-$$}"

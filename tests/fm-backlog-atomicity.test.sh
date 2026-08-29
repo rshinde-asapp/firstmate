@@ -293,7 +293,7 @@ test_dispatch_reads_the_row_from_the_backlog_root() {
   id=atomic-dispatch-root-b2
   case_dir=$(make_home dispatch-root "$id")
   add_item "$case_dir" "$id"
-  require_show_cwd "$case_dir" "$(home_of "$case_dir" | sed 's://*:/:g')"
+  require_show_cwd "$case_dir" "$(cd "$(home_of "$case_dir")" && pwd -P)"
 
   out=$(run_ship_spawn "$case_dir" "$id") || fail "spawn read outside the backlog root: $out"
   [ "$(row_state "$case_dir" "$id")" = in_flight ] \
@@ -315,13 +315,40 @@ test_recovery_uses_the_parent_of_a_trailing_slash_data_record() {
   tasks-axi start "$id" --file "$backlog" >/dev/null
   marker="$(home_of "$case_dir")/state/$id.backlog-close"
   printf 'id=%s\ndata=%s/\narg=--note\narg=local main\n' "$id" "$relocated" > "$marker"
-  require_show_cwd "$case_dir" "$(printf '%s\n' "$case_dir" | sed 's://*:/:g')"
+  require_show_cwd "$case_dir" "$(cd "$case_dir" && pwd -P)"
 
   out=$(run_bootstrap "$case_dir")
   [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
     || fail "relocated-data recovery used the wrong addressing root: $out"
   assert_absent "$marker" "relocated-data recovery retained its close marker"
   pass "recovery uses the parent of a trailing-slash data record"
+}
+
+test_completion_targets_a_nested_relative_data_directory() {
+  local case_dir id relative_data data backlog out
+  id=atomic-close-relative-data-b2
+  case_dir=$(make_home close-relative-data)
+  relative_data=relocated/data
+  data="$case_dir/$relative_data"
+  mkdir -p "$case_dir/relocated"
+  mv "$(home_of "$case_dir")/data" "$data"
+  backlog="$data/backlog.md"
+  tasks-axi add "$id" "item for $id" --kind ship --file "$backlog" >/dev/null
+  tasks-axi start "$id" --file "$backlog" >/dev/null
+  write_task_meta "$case_dir" "$id" ship local-only "spawn_gen=spawn-relative-data"
+
+  out=$(cd "$case_dir" && \
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$(home_of "$case_dir")" \
+    FM_DATA_OVERRIDE="$relative_data" PATH="$case_dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id" 2>&1) \
+    || fail "relative-data teardown failed: $out"
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+    || fail "relative-data teardown mutated a different backlog file"
+  assert_absent "$(home_of "$case_dir")/state/$id.meta" \
+    "relative-data teardown retained its task record"
+  assert_absent "$(home_of "$case_dir")/state/$id.backlog-close" \
+    "relative-data teardown retained its close marker"
+  pass "completion targets nested relative data from the caller directory"
 }
 
 test_dispatch_refuses_an_id_this_home_has_no_item_for() {
@@ -978,6 +1005,7 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
 test_dispatch_moves_the_item_in_flight_in_the_same_run
 test_dispatch_reads_the_row_from_the_backlog_root
 test_recovery_uses_the_parent_of_a_trailing_slash_data_record
+test_completion_targets_a_nested_relative_data_directory
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_reports_a_backlog_read_failure
 test_dispatch_refuses_a_closed_item
