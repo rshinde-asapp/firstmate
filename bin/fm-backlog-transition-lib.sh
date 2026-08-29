@@ -60,8 +60,16 @@ fm_backlog_file() {  # <data-dir>
 # The directory a backlog's own `.tasks.toml` is resolved from.
 fm_backlog_root() {  # <data-dir>
   local data=$1 parent
-  parent=${data%/*}
-  [ "$parent" != "$data" ] && [ -n "$parent" ] || parent=.
+  while [ "$data" != / ] && [ "${data%/}" != "$data" ]; do
+    data=${data%/}
+  done
+  case "$data" in
+    */*)
+      parent=${data%/*}
+      [ -n "$parent" ] || parent=/
+      ;;
+    *) parent=. ;;
+  esac
   printf '%s\n' "$parent"
 }
 

@@ -96,10 +96,14 @@ require_show_cwd() {  # <case-dir> <expected-dir>
   real=$(command -v tasks-axi)
   cat > "$case_dir/fakebin/tasks-axi" <<SH
 #!/usr/bin/env bash
-if [ "\${1:-}" = show ] && [ "\$PWD" != "$expected" ]; then
-  echo "error: wrong tasks root: \$PWD" >&2
-  exit 1
-fi
+case "\${1:-}" in
+  show|start|done)
+    if [ "\$PWD" != "$expected" ]; then
+      echo "error: wrong tasks root: \$PWD" >&2
+      exit 1
+    fi
+    ;;
+esac
 exec "$real" "\$@"
 SH
   chmod +x "$case_dir/fakebin/tasks-axi"
@@ -297,6 +301,27 @@ test_dispatch_reads_the_row_from_the_backlog_root() {
   assert_present "$(home_of "$case_dir")/state/$id.meta" \
     "root-addressed dispatch did not publish its task record"
   pass "dispatch reads backlog rows from the backlog addressing root"
+}
+
+test_recovery_uses_the_parent_of_a_trailing_slash_data_record() {
+  local case_dir id relocated backlog marker out
+  id=atomic-recovery-relocated-root-b2
+  case_dir=$(make_home recovery-relocated-root)
+  relocated="$case_dir/fm-records"
+  mkdir -p "$relocated"
+  backlog="$relocated/backlog.md"
+  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' > "$backlog"
+  tasks-axi add "$id" "item for $id" --kind ship --file "$backlog" >/dev/null
+  tasks-axi start "$id" --file "$backlog" >/dev/null
+  marker="$(home_of "$case_dir")/state/$id.backlog-close"
+  printf 'id=%s\ndata=%s/\narg=--note\narg=local main\n' "$id" "$relocated" > "$marker"
+  require_show_cwd "$case_dir" "$(printf '%s\n' "$case_dir" | sed 's://*:/:g')"
+
+  out=$(run_bootstrap "$case_dir")
+  [ "$(tasks-axi show "$id" --file "$backlog" 2>/dev/null | sed -n 's/^  state: *//p' | head -1)" = done ] \
+    || fail "relocated-data recovery used the wrong addressing root: $out"
+  assert_absent "$marker" "relocated-data recovery retained its close marker"
+  pass "recovery uses the parent of a trailing-slash data record"
 }
 
 test_dispatch_refuses_an_id_this_home_has_no_item_for() {
@@ -904,6 +929,7 @@ test_a_persistent_secondmate_is_never_a_backlog_item() {
 
 test_dispatch_moves_the_item_in_flight_in_the_same_run
 test_dispatch_reads_the_row_from_the_backlog_root
+test_recovery_uses_the_parent_of_a_trailing_slash_data_record
 test_dispatch_refuses_an_id_this_home_has_no_item_for
 test_dispatch_reports_a_backlog_read_failure
 test_dispatch_refuses_a_closed_item
