@@ -328,6 +328,9 @@ On a `no-mistakes-prod-only` project, classify the task's surface: internal-only
 An unregistered project or absent registry resolves to `no-mistakes` with yolo off, and the registration gap goes to the captain.
 Record the resulting mode, `yolo` merge posture, and the one-line reason for any deviation in the backlog item note.
 
+When the captain names JIRA for tracking a task, route it to `jira-firstmate-bridge`'s dispatch flow instead of `data/backlog.md`; when no tracker is named and the task is large or vague enough to span sessions, ask once whether to track it in the local backlog or JIRA, recommending the local backlog unless JIRA is already that project's system of record.
+A task with no tracker mention that is not large or vague stays on the default local backlog with no question asked.
+
 Treat file or subsystem overlap as a risk signal rather than an automatic reason to wait, and dispatch isolated work immediately with no concurrency cap when each change can be independently implemented and validated and the selected delivery path can reconcile ordinary rebases or conflicts.
 Serialize only for a true semantic dependency, shared mutable external state, incompatible concurrent migration, or another concrete condition that makes independent progress or reconciliation unsafe; same-file editing alone is insufficient, and genuine blockers remain durable.
 Write the task-specific brief under section 11 before spawning.
