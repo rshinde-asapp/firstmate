@@ -1,0 +1,30 @@
+.agents/skills/harness-adapters/SKILL.md
+  h_7026a78c4bda37 6,87,90
+.agents/skills/harness-adapters/references/harness/altimate.md
+  h_7026a78c4bda37 1-28
+.agents/skills/harness-adapters/references/harness/omp.md
+  h_7026a78c4bda37 1-23
+AGENTS.md
+  h_7026a78c4bda37 201
+bin/fm-busy-lib.sh
+  h_7026a78c4bda37 193-194
+bin/fm-control-lib.sh
+  h_7026a78c4bda37 66,86,91,115,125-126,144,156,164-165,210-211
+bin/fm-harness.sh
+  h_7026a78c4bda37 88,99,107
+bin/fm-session-lock-lib.sh
+  h_7026a78c4bda37 20,26
+bin/fm-spawn.sh
+  h_7026a78c4bda37 495,1194,1268-1273,1381,1514,1546,2601,2642,3039,3044
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "70570026fd0d4ab92915f34e471556c3ac7f39f1",
+  "prompts": {},
+  "humans": {
+    "h_7026a78c4bda37": {
+      "author": "rshinde-asapp <rshinde@asapp.com>"
+    }
+  }
+}
