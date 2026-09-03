@@ -1,0 +1,14 @@
+AGENTS.md
+  h_7026a78c4bda37 303-306
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "60ba6f195e67627221859e2de41ec8d6fc4afc3c",
+  "prompts": {},
+  "humans": {
+    "h_7026a78c4bda37": {
+      "author": "rshinde-asapp <rshinde@asapp.com>"
+    }
+  }
+}
