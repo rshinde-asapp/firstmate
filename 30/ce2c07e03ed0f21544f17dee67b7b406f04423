@@ -1,0 +1,14 @@
+bin/fm-spawn.sh
+  h_7026a78c4bda37 1967-1980
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "30ce2c07e03ed0f21544f17dee67b7b406f04423",
+  "prompts": {},
+  "humans": {
+    "h_7026a78c4bda37": {
+      "author": "rshinde-asapp <rshinde@asapp.com>"
+    }
+  }
+}
