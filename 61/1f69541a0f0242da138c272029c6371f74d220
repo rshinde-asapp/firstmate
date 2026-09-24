@@ -1,0 +1,18 @@
+bin/fm-bootstrap.sh
+  h_7026a78c4bda37 795,1107,1114
+bin/fm-spawn.sh
+  h_7026a78c4bda37 3029,3168
+bin/fm-wake-lib.sh
+  h_7026a78c4bda37 192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "611f69541a0f0242da138c272029c6371f74d220",
+  "prompts": {},
+  "humans": {
+    "h_7026a78c4bda37": {
+      "author": "rshinde-asapp <rshinde@asapp.com>"
+    }
+  }
+}
