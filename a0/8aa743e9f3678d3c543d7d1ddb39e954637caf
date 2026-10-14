@@ -1,0 +1,22 @@
+bin/fm-dispatch-resolve.sh
+  h_7026a78c4bda37 203-230
+bin/fm-spawn.sh
+  h_7026a78c4bda37 861-864,2071-2072,2076-2082,2570-2577
+docs/configuration.md
+  h_7026a78c4bda37 1132-1134
+tests/fm-dispatch-resolve.test.sh
+  h_7026a78c4bda37 395-406
+tests/fm-spawn-dispatch-profile.test.sh
+  h_7026a78c4bda37 435-474,2243-2244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a08aa743e9f3678d3c543d7d1ddb39e954637caf",
+  "prompts": {},
+  "humans": {
+    "h_7026a78c4bda37": {
+      "author": "rshinde-asapp <rshinde@asapp.com>"
+    }
+  }
+}
