@@ -432,6 +432,46 @@ test_active_dispatch_profile_requires_explicit_harness_for_scout() {
   pass "active crew-dispatch profile requires an explicit harness for scout spawns"
 }
 
+test_dispatch_default_model_applies_when_not_explicit() {
+  local rec id out status launch
+  id=profile-default-model-z27
+  rec=$(make_spawn_case profile-default-model claude "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"rules":[{"when":"current events","use":{"harness":"grok","model":"grok-4","effort":"high"}}],"default":{"harness":"codex","model":"gpt-5","effort":"medium"}}' > "$HOME_DIR/config/crew-dispatch.json"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --harness codex)
+  status=$?
+  expect_code 0 "$status" "spawn with explicit harness should apply matching dispatch default model: $out"
+  assert_grep 'model=gpt-5' "$HOME_DIR/state/$id.meta" "dispatch default model missing from task record"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "--model 'gpt-5'" "dispatch default model missing from launch"
+
+  id=profile-explicit-model-z28
+  rec=$(make_spawn_case profile-explicit-model claude "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"rules":[{"when":"current events","use":{"harness":"grok","model":"grok-4","effort":"high"}}],"default":{"harness":"codex","model":"gpt-5","effort":"medium"}}' > "$HOME_DIR/config/crew-dispatch.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --harness codex --model gpt-5-explicit)
+  status=$?
+  expect_code 0 "$status" "explicit model should override dispatch default: $out"
+  assert_grep 'model=gpt-5-explicit' "$HOME_DIR/state/$id.meta" "explicit model lost precedence"
+  assert_contains "$(cat "$LAUNCH_LOG")" "--model 'gpt-5-explicit'" "explicit model missing from launch"
+  pass "fresh ship spawns apply the matching dispatch default model unless an explicit model is set"
+}
+
+test_unknown_spawn_option_refuses_before_launch() {
+  local rec id out status
+  id=unknown-option-z29
+  rec=$(make_spawn_case unknown-option codex "$id")
+  read_case_record "$rec"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --dry-run)
+  status=$?
+  expect_code 1 "$status" "unknown long option must refuse"
+  assert_contains "$out" "unknown option '--dry-run'" "unknown option refusal must name the option"
+  [ ! -s "$LAUNCH_LOG" ] || fail "unknown option launched worker"
+  assert_absent "$HOME_DIR/state/$id.meta" "unknown option must not publish task"
+  pass "unknown long options refuse before launch or task publication"
+}
+
 test_active_dispatch_profile_allows_explicit_harness() {
   local rec id out status launch
   id=profile-explicit-z13
@@ -2200,7 +2240,8 @@ test_relative_home_overrides_launch_with_absolute_cross_process_paths
 test_home_defaults_preserve_absolute_or_resolve_relative_paths
 test_absolute_override_spelling_is_preserved_in_launch_paths
 test_unresolvable_relative_overrides_fail_loudly
-test_active_dispatch_profile_requires_explicit_harness_for_ship
+test_dispatch_default_model_applies_when_not_explicit
+test_unknown_spawn_option_refuses_before_launch
 test_active_dispatch_profile_requires_explicit_harness_for_scout
 test_active_dispatch_profile_allows_explicit_harness
 test_active_dispatch_profile_allows_positional_harness

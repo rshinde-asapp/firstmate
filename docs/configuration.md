@@ -1129,6 +1129,9 @@ Firstmate cannot see which part of a worker's life uses the resource, so the num
 Firstmate chooses the best matching rule with judgment; shell scripts do not match the natural-language rules.
 Firstmate resolves the rule's profile object or array under `AGENTS.md` section 4 and `quota-array-dispatch`, then passes only concrete `--harness`, `--model`, and `--effort` flags to `fm-spawn.sh`.
 
+For a fresh ship or scout spawn with an explicit harness and no `--model`, `fm-spawn.sh` applies the configured top-level `default` profile's `model` when exactly one profile matches that harness. An explicit `--model` takes precedence. This does not apply to secondmate launches, raw launch commands, or relaunches.
+The `omp` adapter requires explicit models to use `<provider>/<id>`; omit `--model` or use `default` to leave model selection to omp.
+
 **Spawn requirements**
 
 - When the file exists, `fm-spawn.sh` enforces that contract by refusing crewmate and scout spawns that lack an explicit harness (`--harness`, a positional adapter, or a raw launch command).

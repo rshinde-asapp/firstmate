@@ -200,6 +200,34 @@ rules_err=$(jq -r --argjson verified_harnesses "$VERIFIED_HARNESSES" --arg provi
 ' "$RULES" 2>/dev/null) || die "malformed rules file: $RULES_PATH (not JSON)"
 [ -z "$rules_err" ] || die "malformed rules file: $RULES_PATH - $rules_err"
 
+RULE_COUNT=$(jq -r '(.rules // []) | length' "$RULES")
+
+no_rules() {
+  printf 'dispatch-resolve:\n  status: escalate\n  reason: no rules to match\n'
+  exit 0
+}
+
+if [ "$RULE_COUNT" -eq 0 ]; then
+  no_rules
+fi
+
+
+emit_error() {
+  local reason=$1
+  echo "dispatch-resolve: error ($reason)" >&2
+  printf 'dispatch-resolve:\n  status: error\n  reason: %s\n' "$reason"
+  exit 0
+}
+# ---- harness -> provider map, from the single owner in fm-quota-axi-lib.sh -----
+PMAP='{}'
+while IFS= read -r h; do
+  [ -n "$h" ] || continue
+  p=$(fm_quota_single_provider_for_harness "$h" 2>/dev/null) || p=''
+  PMAP=$(jq -c --arg h "$h" --arg p "$p" '. + {($h): (if $p == "" then null else $p end)}' <<<"$PMAP")
+done < <(jq -r '
+  def profiles($v): if ($v | type) == "array" then $v elif ($v | type) == "object" then [$v] else [] end;
+  ([((.rules // [])[]) | profiles(.use)[]] + profiles(.default // null))
+  | map(.harness) | unique | .[]' "$RULES")
 missing_provider=$(jq -r '
   def profiles($v): if ($v | type) == "array" then $v elif ($v | type) == "object" then [$v] else [] end;
   ((.rules // [])[] | profiles(.use)[] | select(has("provider") | not) | "use\t\(.harness)"),
@@ -215,30 +243,6 @@ if [ -n "$missing_provider" ]; then
     missing_provider_detail="${missing_provider_detail:+$missing_provider_detail; }$location profiles whose harness lacks one authoritative provider family require provider: $harness"
   done <<< "$missing_provider"
   die "malformed rules file: $RULES_PATH - $missing_provider_detail"
-fi
-
-# ---- harness -> provider map, from the single owner in fm-quota-axi-lib.sh -----
-PMAP='{}'
-while IFS= read -r h; do
-  [ -n "$h" ] || continue
-  p=$(fm_quota_single_provider_for_harness "$h" 2>/dev/null) || p=''
-  PMAP=$(jq -c --arg h "$h" --arg p "$p" '. + {($h): (if $p == "" then null else $p end)}' <<<"$PMAP")
-done < <(jq -r '
-  def profiles($v): if ($v | type) == "array" then $v elif ($v | type) == "object" then [$v] else [] end;
-  ([((.rules // [])[]) | profiles(.use)[]] + profiles(.default // null))
-  | map(.harness) | unique | .[]' "$RULES")
-
-RULE_COUNT=$(jq -r '(.rules // []) | length' "$RULES")
-
-emit_error() {
-  local reason=$1
-  echo "dispatch-resolve: error ($reason)" >&2
-  printf 'dispatch-resolve:\n  status: error\n  reason: %s\n' "$reason"
-  exit 0
-}
-
-if [ "$RULE_COUNT" -eq 0 ]; then
-  no_rules
 fi
 
 RESP_FILE=$(mktemp) || die "mktemp failed"

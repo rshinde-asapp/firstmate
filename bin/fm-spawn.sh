@@ -858,6 +858,10 @@ for a in "$@"; do
     TRACEPARENT_ARG=${a#--traceparent=}
     TRACEPARENT_SET=1
     ;;
+  --*)
+    echo "error: unknown option '$a'" >&2
+    exit 1
+    ;;
   *) POS+=("$a") ;;
   esac
 done
@@ -2064,12 +2068,18 @@ pi_supports_approve() {
 # registers at runtime (claude-bridge is the verified example), so the check is
 # scoped exactly to what the listing can prove: a <provider>/<id> whose provider
 # IS listed must be listed too, a provider the listing does not know passes
-# through with a notice, a bare fuzzy pattern is omp's own matcher's job, and an
-# unreadable listing establishes nothing (harness-adapters model-and-effort.md).
+# through with a notice, and an unreadable listing establishes nothing
+# (harness-adapters model-and-effort.md).
 omp_model_validate() { # <omp-bin> <model>
   local bin=$1 model=$2 provider listing providers
   [ -n "$model" ] && [ "$model" != default ] || return 0
-  case "$model" in */*) ;; *) return 0 ;; esac
+  case "$model" in
+  */*) ;;
+  *)
+    echo "error: omp model '$model' must use <provider>/<id>" >&2
+    return 1
+    ;;
+  esac
   command -v jq >/dev/null 2>&1 || return 0
   listing=$(OMP_SKIP_SETUP=1 "$bin" models --json 2>/dev/null) || return 0
   providers=$(printf '%s' "$listing" | jq -r '.models[]?.provider // empty' 2>/dev/null | sort -u) || return 0
@@ -2556,6 +2566,14 @@ if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
       esac
     fi
   fi
+fi
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$RAW_LAUNCH" -eq 0 ] && [ "$MODEL_SET" -eq 0 ] && [ -f "$CONFIG/crew-dispatch.json" ]; then
+  dispatch_default_model=$(jq -r --arg harness "$HARNESS" '
+    def profiles($value): if ($value | type) == "array" then $value else [$value] end;
+    [profiles(.default // null)[] | select(.harness == $harness) | .model // empty]
+    | unique | if length == 1 then .[0] else empty end
+  ' "$CONFIG/crew-dispatch.json" 2>/dev/null) || dispatch_default_model=
+  [ -z "$dispatch_default_model" ] || MODEL=$dispatch_default_model
 fi
 # Ultra is an explicit native capability, never a Pi thinking-level alias.
 # Validate the fully resolved profile before worktree or endpoint provisioning.

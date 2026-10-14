@@ -392,6 +392,18 @@ for direct_rules in "$DEFAULT_ONLY" "$EMPTY_RULES"; do
   assert_absent "$LOG/argv" "no-rule resolution never calls curl: $direct_rules"
   assert_absent "$LOG/quota-axi.calls" "no-rule resolution never reads quota: $direct_rules"
 done
+EMPTY_OMP_DEFAULT="$TMP_ROOT/empty-omp-default.json"
+printf '%s\n' '{"rules":[],"default":{"harness":"omp","model":"litellm-cost-saver"}}' > "$EMPTY_OMP_DEFAULT"
+cp "$EMPTY_OMP_DEFAULT" "$RULES"
+reset_log
+TYPESAFE_API_KEY=$KEY run code out err "$BRIEF"
+expect_code 0 "$code" "empty rules with an OMP default exits 0"
+assert_contains "$out" '  status: escalate' "empty OMP rules are non-clear"
+assert_contains "$out" '  reason: no rules to match' "empty OMP rules return control to firstmate"
+assert_not_contains "$out" '  profile:' "empty OMP rules emit no profile"
+assert_absent "$LOG/argv" "empty OMP rules never call curl"
+assert_absent "$LOG/quota-axi.calls" "empty OMP rules never read quota"
+
 
 AGY_RULE="$TMP_ROOT/agy-rule.json"
 printf '%s\n' '{"rules":[{"when":"Agy work.","use":{"harness":"agy"}}]}' > "$AGY_RULE"
