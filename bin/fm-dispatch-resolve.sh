@@ -202,11 +202,6 @@ rules_err=$(jq -r --argjson verified_harnesses "$VERIFIED_HARNESSES" --arg provi
 
 RULE_COUNT=$(jq -r '(.rules // []) | length' "$RULES")
 
-no_rules() {
-  printf 'dispatch-resolve:\n  status: escalate\n  reason: no rules to match\n'
-  exit 0
-}
-
 if [ "$RULE_COUNT" -eq 0 ]; then
   no_rules
 fi
