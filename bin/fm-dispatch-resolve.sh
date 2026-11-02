@@ -363,13 +363,6 @@ rules_err=$(jq -r --argjson verified_harnesses "$VERIFIED_HARNESSES" --arg provi
 ' "$RULES" 2>/dev/null) || die "malformed rules file: $RULES_PATH (not JSON)"
 [ -z "$rules_err" ] || die "malformed rules file: $RULES_PATH - $rules_err"
 
-RULE_COUNT=$(jq -r '(.rules // []) | length' "$RULES")
-
-if [ "$RULE_COUNT" -eq 0 ]; then
-  no_rules
-fi
-
-
 emit_error() {
   local reason=$1
   echo "dispatch-resolve: error ($reason)" >&2
@@ -401,6 +394,11 @@ if [ -n "$missing_provider" ]; then
     missing_provider_detail="${missing_provider_detail:+$missing_provider_detail; }$location profiles whose harness lacks one authoritative provider family require provider: $harness"
   done <<< "$missing_provider"
   die "malformed rules file: $RULES_PATH - $missing_provider_detail"
+fi
+RULE_COUNT=$(jq -r '(.rules // []) | length' "$RULES")
+
+if [ "$RULE_COUNT" -eq 0 ]; then
+  no_rules
 fi
 
 

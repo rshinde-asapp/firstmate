@@ -3114,6 +3114,17 @@ case "$ARG3" in
   }
   ;;
 esac
+# Apply the matching top-level default model only to fresh ship/scout launches.
+# Explicit --model, secondmate pins, raw commands, and relaunches keep precedence.
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "$RAW_LAUNCH" -eq 0 ] && [ "$MODEL_SET" -eq 0 ] && [ -f "$CONFIG/crew-dispatch.json" ]; then
+  dispatch_default_model=$(jq -r --arg harness "$HARNESS" '
+    def profiles($value): if ($value | type) == "array" then $value else [$value] end;
+    [profiles(.default // null)[] | select(.harness == $harness)] as $matches
+    | if ($matches | length) == 1 then ($matches[0].model // empty) else empty end
+  ' "$CONFIG/crew-dispatch.json" 2>/dev/null) || dispatch_default_model=
+  [ -z "$dispatch_default_model" ] || MODEL=$dispatch_default_model
+fi
+ [ "$HARNESS" != gemini ] || [ "$KIND" != secondmate ] || { echo "error: gemini is verified for crewmate and scout work, not as a secondmate supervisor" >&2; exit 1; }
 
 # muse, gemini, devin, commandcode, polytoken, cortex, and kiro are verified as CREWMATE/SCOUT adapters only. A secondmate is
 # a firstmate instance, so it needs a primary supervision protocol.

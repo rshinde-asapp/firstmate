@@ -1142,7 +1142,7 @@ for direct_rules in "$DEFAULT_ONLY" "$EMPTY_RULES"; do
   assert_absent "$LOG/quota-axi.calls" "no-rule resolution never reads quota: $direct_rules"
 done
 EMPTY_OMP_DEFAULT="$TMP_ROOT/empty-omp-default.json"
-printf '%s\n' '{"rules":[],"default":{"harness":"omp","model":"litellm-cost-saver"}}' > "$EMPTY_OMP_DEFAULT"
+printf '%s\n' '{"rules":[],"default":{"harness":"omp","model":"openai-codex/gpt-6","provider":"codex"}}' > "$EMPTY_OMP_DEFAULT"
 cp "$EMPTY_OMP_DEFAULT" "$RULES"
 reset_log
 TYPESAFE_API_KEY=$KEY run code out err "$BRIEF"
@@ -1796,6 +1796,7 @@ for bad in \
   '{"rules":[{"when":"x","use":{"harness":"grok","effort":"max"}}]}|each use profile effort must be supported by its harness and model' \
   '{"rules":[{"when":"x","use":{"harness":"opencode","model":"anthropic/claude-sonnet-4-5"}}]}|use profiles whose harness lacks one authoritative provider family require provider: opencode' \
   '{"rules":[{"when":"x","use":{"harness":"rovo"}}]}|use profiles whose harness lacks one authoritative provider family require provider: rovo' \
+  '{"default":{"harness":"pi"}}|default profiles whose harness lacks one authoritative provider family require provider: pi' \
   '{"rules":[{"when":"x","use":{"harness":"codex"}}],"default":{"harness":"pi","model":"anthropic/claude-sonnet-5"}}|default profiles whose harness lacks one authoritative provider family require provider: pi'; do
   printf '%s\n' "${bad%%|*}" > "$RULES"
   TYPESAFE_API_KEY=$KEY run code out err "$BRIEF"

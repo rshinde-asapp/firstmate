@@ -460,6 +460,32 @@ test_active_dispatch_profile_requires_explicit_harness_for_scout() {
 }
 
 
+test_dispatch_default_model_applies_when_not_explicit() {
+  local rec id out status launch
+  id=profile-default-model-z27
+  rec=$(make_spawn_case profile-default-model claude "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"rules":[{"when":"current events","use":{"harness":"grok","model":"grok-4","effort":"high"}}],"default":{"harness":"codex","model":"gpt-5","effort":"medium"}}' > "$HOME_DIR/config/crew-dispatch.json"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --harness codex)
+  status=$?
+  expect_code 0 "$status" "spawn with explicit harness should apply matching dispatch default model: $out"
+  assert_grep 'model=gpt-5' "$HOME_DIR/state/$id.meta" "dispatch default model missing from task record"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "--model 'gpt-5'" "dispatch default model missing from launch"
+
+  id=profile-explicit-model-z28
+  rec=$(make_spawn_case profile-explicit-model claude "$id")
+  read_case_record "$rec"
+  printf '%s\n' '{"rules":[{"when":"current events","use":{"harness":"grok","model":"grok-4","effort":"high"}}],"default":{"harness":"codex","model":"gpt-5","effort":"medium"}}' > "$HOME_DIR/config/crew-dispatch.json"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --harness codex --model gpt-5-explicit)
+  status=$?
+  expect_code 0 "$status" "explicit model should override dispatch default: $out"
+  assert_grep 'model=gpt-5-explicit' "$HOME_DIR/state/$id.meta" "explicit model lost precedence"
+  assert_contains "$(cat "$LAUNCH_LOG")" "--model 'gpt-5-explicit'" "explicit model missing from launch"
+  pass "fresh ship spawns apply the matching dispatch default model unless an explicit model is set"
+}
+
 test_unknown_spawn_option_refuses_before_launch() {
   local rec id out status
   id=unknown-option-z29
@@ -2813,6 +2839,7 @@ test_claude_crewmate_launch_carries_the_attribution_policy
 test_keep_ai_trailers_omits_attribution_settings_and_strip_hooks
 test_keep_ai_trailers_reaches_secondmate_crew_launches
 test_claude_secondmate_launch_carries_the_attribution_policy
+test_dispatch_default_model_applies_when_not_explicit
 test_active_dispatch_profile_does_not_block_secondmate_launch
 
 echo "# all fm-spawn-dispatch-profile tests passed"
