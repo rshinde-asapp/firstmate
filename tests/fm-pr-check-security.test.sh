@@ -138,6 +138,7 @@ SH
   chmod +x "$fake_root/bin/fm-guard.sh"
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
+printf 'host=%s\n' "${GH_HOST:-}" >> "$FM_TEST_GH_LOG"
 printf '%s\n' "$*" >> "$FM_TEST_GH_LOG"
 case "${1:-} ${2:-}" in
   "api graphql")
@@ -304,7 +305,7 @@ write_poll_meta() {
 run_check_entry() {
   local dir=$1
   shift
-  FM_ROOT_OVERRIDE="$dir/root" FM_HOME="$dir/home" \
+  FM_ROOT_OVERRIDE="$dir/root" FM_HOME="$dir/home" FM_CONFIG_OVERRIDE="$dir/home/config" \
     FM_TEST_GUARD_LOG="$dir/guard.log" FM_TEST_GH_LOG="$dir/gh.log" \
     FM_TEST_GH_AXI_LOG="$dir/gh-axi.log" FM_TEST_GLAB_LOG="$dir/glab.log" \
     FM_TEST_GERRIT_AXI_LOG="$dir/gerrit-axi.log" \
@@ -315,7 +316,7 @@ run_check_entry() {
 run_merge_entry() {
   local dir=$1
   shift
-  FM_ROOT_OVERRIDE="$dir/root" FM_HOME="$dir/home" \
+  FM_ROOT_OVERRIDE="$dir/root" FM_HOME="$dir/home" FM_CONFIG_OVERRIDE="$dir/home/config" \
     FM_TEST_GUARD_LOG="$dir/guard.log" FM_TEST_GH_LOG="$dir/gh.log" \
     FM_TEST_GH_AXI_LOG="$dir/gh-axi.log" FM_TEST_GLAB_LOG="$dir/glab.log" \
     FM_TEST_GERRIT_AXI_LOG="$dir/gerrit-axi.log" \
@@ -849,13 +850,14 @@ SH
 
   for id in _noncanonical aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; do
     dir=$(make_case "legacy-teardown-${id:0:12}")
+    # This record also exercises the PR merge entrypoint below.
     fm_write_meta "$dir/home/state/$id.meta" \
       "window=firstmate:fm-$id" \
       "endpoint_task_id=$id" \
       "worktree=$dir/wt" \
       "project=$dir/project" \
       'kind=ship' \
-      'mode=local-only'
+      'mode=no-mistakes'
     cat > "$dir/fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -890,6 +892,162 @@ SH
     [ ! -e "$dir/home/state/$id.meta" ] || fail "legacy task teardown retained metadata"
   done
   pass "valid direct and merge flows record exact metadata and reject multiline head metadata"
+}
+
+# A GitHub Enterprise pull request URL is accepted only for a host this home
+# names in config/github-hosts, and the parsed host is carried to every forge
+# call on the check, poll, and merge paths. github.com needs no configuration
+# and keeps the exact behavior it had before the list existed.
+test_github_enterprise_config_resolution() {
+  local code_root url
+  code_root="$TMP_ROOT/github-enterprise-code-root"
+  url=https://leadsonline.ghe.com/Org/repo/pull/7
+  mkdir -p "$code_root/bin" "$code_root/config" "$code_root/home/config" "$code_root/override"
+  cp "$ROOT/bin/fm-pr-lib.sh" "$code_root/bin/"
+  printf 'leadsonline.ghe.com\n' > "$code_root/config/github-hosts"
+  printf 'home.ghe.com\n' > "$code_root/home/config/github-hosts"
+  printf 'override.ghe.com\n' > "$code_root/override/github-hosts"
+
+  (
+    unset FM_HOME FM_CONFIG_OVERRIDE
+    # shellcheck source=/dev/null
+    . "$code_root/bin/fm-pr-lib.sh" || exit 1
+    cd "$TMP_ROOT" || exit 1
+    fm_pr_url_parse "$url" || fail "parser ignored the code-root config with both home variables unset"
+    [ "$FM_PR_PROVIDER|$FM_PR_HOST|$FM_PR_PATH|$FM_PR_OWNER|$FM_PR_REPO|$FM_PR_NUMBER" \
+      = 'github|leadsonline.ghe.com|Org/repo|Org|repo|7' ] \
+      || fail "default-home parsing returned the wrong Enterprise identity"
+
+    FM_HOME=
+    fm_pr_url_parse "$url" || fail "an empty FM_HOME hid the code-root config"
+
+    # Consumed by the separately analyzed parser library.
+    # shellcheck disable=SC2034
+    FM_HOME="$code_root/home"
+    fm_pr_url_parse https://home.ghe.com/Org/repo/pull/7 \
+      || fail "FM_HOME did not override the code-root config"
+    ! fm_pr_url_parse "$url" || fail "FM_HOME still accepted a host only named in the code-root config"
+
+    FM_CONFIG_OVERRIDE="$code_root/override"
+    fm_pr_url_parse https://override.ghe.com/Org/repo/pull/7 \
+      || fail "FM_CONFIG_OVERRIDE did not override FM_HOME"
+    ! fm_pr_url_parse https://home.ghe.com/Org/repo/pull/7 \
+      || fail "FM_CONFIG_OVERRIDE still accepted a host only named in FM_HOME"
+    unset FM_HOME
+    fm_pr_url_parse https://override.ghe.com/Org/repo/pull/7 \
+      || fail "FM_CONFIG_OVERRIDE required FM_HOME"
+
+    unset FM_CONFIG_OVERRIDE
+    fm_pr_url_parse "$url" || fail "parser lost the code-root config after clearing overrides"
+  ) || fail "GitHub Enterprise config resolution failed"
+  pass "GitHub Enterprise config resolves override, home, then the library code root"
+}
+
+test_github_enterprise_hosts() {
+  local dir cfg url out sidecar rc
+  url=https://leadsonline.ghe.com/Org/repo/pull/7
+
+  cfg="$TMP_ROOT/github-enterprise-config"
+  mkdir -p "$cfg"
+  printf '# GitHub Enterprise hosts this home uses\nleadsonline.ghe.com\n' > "$cfg/github-hosts"
+
+  # The allowed host keeps GitHub's own owner and repository rules and becomes
+  # the recorded host, exactly as a self-hosted GitLab or Forgejo host does.
+  out=$(
+    FM_CONFIG_OVERRIDE=$cfg
+    export FM_CONFIG_OVERRIDE
+    fm_pr_url_parse "$url" || exit 1
+    printf '%s|%s|%s|%s|%s|%s\n' "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" \
+      "$FM_PR_OWNER" "$FM_PR_REPO" "$FM_PR_NUMBER"
+  ) || fail "parser refused a GitHub Enterprise URL this home names"
+  [ "$out" = 'github|leadsonline.ghe.com|Org/repo|Org|repo|7' ] \
+    || fail "parser returned the wrong identity for a GitHub Enterprise URL: $out"
+
+  out=$(
+    FM_CONFIG_OVERRIDE=$cfg
+    export FM_CONFIG_OVERRIDE
+    fm_pr_url_parse https://github.com/o/r/pull/1 || exit 1
+    printf '%s|%s\n' "$FM_PR_PROVIDER" "$FM_PR_HOST"
+  ) || fail "parser refused github.com once a host list existed"
+  [ "$out" = 'github|github.com' ] || fail "github.com identity changed: $out"
+
+  # A look-alike of an allowed host, a different Enterprise host, and a
+  # look-alike of github.com all stay refused while the list exists.
+  for out in \
+    https://leadsonline.ghe.com.evil/Org/repo/pull/7 \
+    https://evil-leadsonline.ghe.com/Org/repo/pull/7 \
+    https://other.ghe.com/Org/repo/pull/7 \
+    https://github.com.evil/o/r/pull/1
+  do
+    FM_CONFIG_OVERRIDE=$cfg fm_pr_url_parse "$out" \
+      && fail "parser accepted a GitHub host the home does not name: $out"
+  done
+  FM_CONFIG_OVERRIDE="$TMP_ROOT/absent-config" fm_pr_url_parse "$url" \
+    && fail "parser accepted a GitHub Enterprise host with no configured host list"
+
+  # Registration records the Enterprise identity and carries its host to every
+  # gh read it makes.
+  dir=$(make_case github-enterprise)
+  write_task_meta "$dir"
+  printf 'leadsonline.ghe.com\n' > "$dir/home/config/github-hosts"
+  run_check_entry "$dir" task-a "$url" > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "check entrypoint refused a configured GitHub Enterprise URL: $(cat "$dir/stderr")"
+  grep -qxF "pr=$url" "$dir/home/state/task-a.meta" \
+    || fail "canonical GitHub Enterprise pr metadata was not recorded"
+  sidecar=$(cat "$dir/home/state/task-a.pr-poll")
+  [ "$sidecar" = $'github\nhttps://leadsonline.ghe.com/Org/repo/pull/7\nleadsonline.ghe.com\nOrg/repo\n7' ] \
+    || fail "published sidecar did not record the GitHub Enterprise host"
+  grep -qxF 'host=leadsonline.ghe.com' "$dir/gh.log" \
+    || fail "no registration read addressed the GitHub Enterprise host"
+  ! grep -qxF 'host=' "$dir/gh.log" \
+    || fail "a registration read addressed github.com for a GitHub Enterprise pull request"
+  FM_CONFIG_OVERRIDE="$dir/home/config" \
+    fm_pr_poll_artifacts_valid "$dir/home/state" task-a "$POLL" \
+    || fail "the recorded GitHub Enterprise poll identity did not re-validate"
+
+  # The static poll reports the merge of that recorded identity.
+  out=$(FM_TEST_GH_STATE=MERGED run_poll "$dir")
+  [ "$out" = merged ] || fail "static poll did not report a merged GitHub Enterprise pull request"
+
+  # Merging addresses the host too, and keeps addressing only owner and
+  # repository in the command itself.
+  : > "$dir/gh.log"
+  run_merge_entry "$dir" task-a "$url" > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "merge entrypoint refused a configured GitHub Enterprise URL: $(cat "$dir/stderr")"
+  grep -qxF 'pr merge 7 --repo Org/repo --match-head-commit 0123456789abcdef0123456789abcdef01234567 --squash' \
+    "$dir/gh.log" || fail "merge wrapper did not derive owner and repository for a GitHub Enterprise pull request"
+  grep -qxF 'host=leadsonline.ghe.com' "$dir/gh.log" \
+    || fail "no merge read addressed the GitHub Enterprise host"
+  ! grep -qxF 'host=' "$dir/gh.log" \
+    || fail "a merge read addressed github.com for a GitHub Enterprise pull request"
+
+  # A host the home does not name is refused before anything is recorded,
+  # armed, or asked of the forge.
+  dir=$(make_case github-enterprise-unlisted)
+  write_task_meta "$dir"
+  set +e
+  run_check_entry "$dir" task-a "$url" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -eq 2 ] || fail "check entrypoint accepted an unlisted GitHub Enterprise host"
+  [ "$(cat "$dir/stderr")" = 'error: invalid PR check request' ] \
+    || fail "unlisted GitHub host diagnostic was not the fixed refusal"
+  assert_no_grep 'pr=' "$dir/home/state/task-a.meta" "an unlisted GitHub host recorded pr metadata"
+  [ ! -s "$dir/gh.log" ] || fail "an unlisted GitHub host still reached the forge"
+
+  # github.com keeps its previous shape: the same URL records and merges with no
+  # host exported, so every call addresses github.com exactly as before.
+  dir=$(make_case github-dotcom-unchanged)
+  write_task_meta "$dir"
+  run_check_entry "$dir" task-a https://github.com/my-org/repo/pull/37 \
+    > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "github.com registration broke once the host list existed: $(cat "$dir/stderr")"
+  grep -qxF 'pr=https://github.com/my-org/repo/pull/37' "$dir/home/state/task-a.meta" \
+    || fail "github.com pr metadata changed"
+  [ -s "$dir/gh.log" ] || fail "github.com registration made no forge read"
+  ! grep -qE '^host=.+' "$dir/gh.log" \
+    || fail "github.com registration exported a host it never needed"
+  pass "GitHub Enterprise hosts are accepted only when the home names them and their host reaches every forge call"
 }
 
 # Runs one watcher under a hang guard that TERMs it and returns 124 once it has
@@ -1466,6 +1624,35 @@ SH
     [ ! -e "$state/.watch.lock/pid" ] || fail "$backend watcher left its singleton lock"
   done
   pass "returned custom check descendants are drained on installed and fallback timeout paths"
+}
+
+test_timed_out_custom_check_surfaces_with_partial_output() {
+  local backend dir state rc force_fallback
+  for backend in installed-timeout fallback-timeout; do
+    dir=$(make_case "timed-out-custom-check-$backend")
+    state="$dir/home/state"
+    cat > "$state/custom.check.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'finding before the cut\n'
+sleep 30
+printf 'finding after the cut\n'
+SH
+    chmod 0700 "$state/custom.check.sh"
+    FM_HOME="$dir/home" "$REGISTER" custom >/dev/null || fail "could not register $backend timed-out check"
+    force_fallback=0
+    [ "$backend" = installed-timeout ] || force_fallback=1
+
+    rc=0
+    FM_TEST_CHECK_TIMEOUT=1 FM_CHECK_FORCE_FALLBACK="$force_fallback" \
+      run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch.out" 2> "$dir/watch.err" || rc=$?
+    [ "$rc" -eq 0 ] || fail "$backend watcher did not stop on the timed-out check (rc=$rc): $(cat "$dir/watch.err")"
+    grep -qxF "check: $state/custom.check.sh: finding before the cut" "$dir/watch.out" \
+      || fail "$backend watcher dropped output printed before the timeout: $(cat "$dir/watch.out")"
+    grep -qxF 'timed out after 1s' "$dir/watch.out" \
+      || fail "$backend watcher kept a timed-out check silent: $(cat "$dir/watch.out")"
+    ! grep -qF 'finding after the cut' "$dir/watch.out" || fail "$backend watcher let the check run past its timeout"
+  done
+  pass "a timed-out custom check surfaces its timeout and earlier output on installed and fallback timeout paths"
 }
 
 test_teardown_removes_poll_artifacts() {
@@ -2477,8 +2664,9 @@ test_self_merge_and_poll_publish_one_outcome() {
     || fail "merge-outcome-uncommitted: could not arm merge poll"
   cat >"$dir/fakebin/mv" <<'SH'
 #!/usr/bin/env bash
-case " $* " in
-  *pr-poll-merge-notified*) exit 1 ;;
+# Reject only the marker commit, not pid.tmp publication inside its lock.
+case "${!#}" in
+  *.pr-poll-merge-notified) exit 1 ;;
 esac
 exec "$FM_TEST_REAL_MV" "$@"
 SH
@@ -3172,7 +3360,7 @@ test_teardown_cannot_race_authority_consumption() {
     "worktree=$dir/wt" \
     "project=$dir/project" \
     'kind=ship' \
-    'mode=local-only' \
+    'mode=no-mistakes' \
     'yolo=on'
   write_away_record "$dir"
   run_check_entry "$dir" task-a "$url" >/dev/null 2> "$dir/seed.err" \
@@ -3310,6 +3498,93 @@ shift_registration_device() {  # <state> <id> [both|data|check]
     both|check) [ "$(sed -n 11p "$registration")" = "$shifted:$(fm_pr_file_inode "$state/$id.check.sh")" ] \
       || fail "shifted fixture did not move only the recorded check device" ;;
   esac
+}
+
+test_registered_poll_survives_template_update_and_relaunch() {
+  local scenario dir state historical_poll registration_hash rc
+  for scenario in template-update relaunch combined; do
+    dir=$(make_case "registered-poll-$scenario")
+    state="$dir/home/state"
+    historical_poll="$dir/historical-fm-pr-poll.sh"
+    if [ "$scenario" = relaunch ]; then
+      cp "$POLL" "$historical_poll"
+    else
+      # An older generation may contain different code. It must never execute:
+      # the watcher dispatches the current repository poll with validated data.
+      # The stub's whole body is reachable, so a mistaken execution of the
+      # registered copy writes the marker, reports a non-merged result, and
+      # reaches no forge instead of passing on the current poll's behaviour.
+      cat > "$historical_poll" <<SH
+#!/usr/bin/env bash
+printf 'historical poll executed\\n' > '$dir/sidecar-executed'
+printf 'historical-generation\\n'
+SH
+    fi
+    write_poll_meta "$state" task-a https://github.com/o/r/pull/1
+    seed_canonical_poll "$dir" task-a https://github.com/o/r/pull/1 "$historical_poll"
+    if [ "$scenario" != template-update ]; then
+      printf 'control_relaunch_tx=114614.20261024T230110Z.26328\n' >> "$state/task-a.meta"
+    fi
+    if [ "$scenario" != relaunch ]; then
+      ! cmp -s "$POLL" "$state/task-a.check.sh" || fail "$scenario did not change the template"
+    fi
+    fm_pr_poll_snapshot_capture "$state" task-a "$POLL" \
+      || fail "$scenario rejected an intact registered generation"
+    fm_pr_poll_snapshot_matches "$state" task-a "$POLL" \
+      || fail "$scenario lost its registered snapshot"
+    # A cycle that sees no merge must leave the authenticated generation armed
+    # instead of revoking it for diverging from the updated template.
+    add_stop_custom_check "$dir"
+    rc=0
+    FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=OPEN \
+      run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch-open.out" 2> "$dir/watch-open.err" || rc=$?
+    [ "$rc" -eq 0 ] || fail "$scenario open watcher failed: $(cat "$dir/watch-open.err")"
+    ! grep -F 'rejected unauthenticated state checks' "$dir/watch-open.out" >/dev/null \
+      || fail "$scenario revoked an intact generation before its merge: $(cat "$dir/watch-open.out")"
+    case "$(cat "$dir/watch-open.out")" in
+      check:*z-stop.check.sh:*stop-cycle) ;;
+      *) fail "$scenario open cycle did not reach the control check: $(cat "$dir/watch-open.out")" ;;
+    esac
+    fm_pr_poll_snapshot_matches "$state" task-a "$POLL" \
+      || fail "$scenario disarmed an intact generation before its merge"
+    ack_watcher_cycle "$state" || fail "$scenario could not acknowledge the open cycle"
+    rm -f "$state/z-stop.check.sh" "$state/z-stop.check-trust" "$state/.last-check" "$dir/gh.log"
+    rc=0
+    FM_TEST_GH_LOG="$dir/gh.log" FM_TEST_GH_STATE=MERGED \
+      run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch.out" 2> "$dir/watch.err" || rc=$?
+    [ "$rc" -eq 0 ] || fail "$scenario watcher failed: $(cat "$dir/watch.err")"
+    grep -F 'task-a.check.sh: merged' "$dir/watch.out" >/dev/null \
+      || fail "$scenario did not detect the merge: $(cat "$dir/watch.out")"
+    [ ! -e "$dir/sidecar-executed" ] || fail "$scenario executed state-file code"
+    grep -F 'pr view https://github.com/o/r/pull/1 --json state' "$dir/gh.log" >/dev/null \
+      || fail "$scenario did not run the repository poll"
+    awk -F'\t' -v prefix="check: merge landed: task-a https://github.com/o/r/pull/1" \
+      'index($5, prefix) == 1 { found=1 } END { exit !found }' "$state/.wake-queue" \
+      || fail "$scenario lost the merge notification: $(merged_ledger_row "$state" task-a)"
+    assert_poll_absent "$state" task-a
+    # Re-arm the same old generation to test tampering on its original inode.
+    seed_canonical_poll "$dir" task-a https://github.com/o/r/pull/1 "$historical_poll"
+    registration_hash=$(fm_pr_sha256 "$state/task-a.pr-poll-registration")
+    printf '# forged after registration\n' >> "$state/task-a.check.sh"
+    ! fm_pr_poll_snapshot_capture "$state" task-a "$POLL" \
+      || fail "$scenario accepted a forged check"
+    [ "$(fm_pr_sha256 "$state/task-a.pr-poll-registration")" = "$registration_hash" ] \
+      || fail "$scenario rewrote trust for a forged check"
+  done
+  for scenario in unknown-field duplicate-pr; do
+    dir=$(make_case "registered-poll-$scenario")
+    state="$dir/home/state"
+    write_poll_meta "$state" task-a https://github.com/o/r/pull/1
+    seed_canonical_poll "$dir" task-a https://github.com/o/r/pull/1
+    printf 'control_relaunch_tx=114614.20261024T230110Z.26328\n' >> "$state/task-a.meta"
+    case "$scenario" in
+      unknown-field) printf 'injected=value\n' >> "$state/task-a.meta" ;;
+      duplicate-pr) printf 'pr=https://github.com/o/r/pull/2\n' >> "$state/task-a.meta" ;;
+    esac
+    ! fm_pr_poll_snapshot_capture "$state" task-a "$POLL" \
+      || fail "$scenario accepted forged metadata after the relaunch marker"
+  done
+  pass "registered generations survive template updates and relaunch metadata without executing sidecar code or trusting forged bytes"
 }
 
 test_device_renumbered_poll_stays_armed() {
@@ -3603,6 +3878,8 @@ SH
 }
 
 test_parser_matrix
+test_github_enterprise_config_resolution
+test_github_enterprise_hosts
 test_gitlab_merge_watch
 test_forgejo_merge_watch
 test_forgejo_login_list_shapes
@@ -3640,6 +3917,7 @@ test_atomic_interruption_leaves_no_partial_artifact
 test_concurrent_watcher_sees_only_complete_publication
 test_poll_publication_refuses_unsafe_destinations
 test_live_artifact_single_link_and_privacy_validation
+test_registered_poll_survives_template_update_and_relaunch
 test_device_renumbered_poll_stays_armed
 test_device_rerecord_refuses_tampered_artifacts
 test_device_rerecord_serializes_direct_rearm
@@ -3648,4 +3926,5 @@ test_postrename_poll_validation_revokes_and_retries
 test_bootstrap_leaves_unauthenticated_checks
 test_custom_snapshot_cleanup_on_signal
 test_returned_custom_check_descendants_are_drained
+test_timed_out_custom_check_surfaces_with_partial_output
 test_teardown_removes_poll_artifacts

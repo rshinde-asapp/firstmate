@@ -2,13 +2,20 @@
 # Merge a task's PR or MR after recording pr= and any available pr_head= through
 # bin/fm-pr-check.sh, so teardown can verify landed work after squash merges.
 # The full canonical URL is parsed by bin/fm-pr-lib.sh. A GitHub pull request is
-# addressed through gh by the derived owner and repository; a GitLab merge
+# addressed through gh by the derived owner and repository on the derived host,
+# exported as GH_HOST for the whole run, which is github.com or a GitHub
+# Enterprise host this home names in config/github-hosts; a GitLab merge
 # request is addressed through glab by the project URL rebuilt from the parsed
 # host and path, so any instance works and no host is hardcoded; a Forgejo
 # pull request is addressed through tea by the derived owner and repository
 # plus a "tea login" resolved fresh from the parsed host on every run. A Gerrit
 # change is refused outright: that adapter is read-only, and the refusal at the
 # parse below owns why.
+#
+# Usage:
+#   fm-pr-merge.sh <task-id> <pr-url> [--attended-override] [--allow-red <check>]
+#     [--allow-missing <check>] [--allow-no-pipeline] [-- <forge merge flags>]
+#   fm-pr-merge.sh -h | --help
 #
 # Merge method on GitHub defaults to --squash when the caller passes none of
 # --squash, --merge, --rebase, or --method after the optional -- separator.
@@ -184,6 +191,17 @@
 # misreported as a failed merge.
 set -eu
 
+usage() {
+  sed -n '2,${/^#/!q;p;}' "$0" | sed 's/^# \{0,1\}//'
+}
+
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
@@ -217,6 +235,14 @@ PR_PATH=$FM_PR_PATH
 PR_OWNER=$FM_PR_OWNER
 PR_REPO=$FM_PR_REPO
 PR_NUMBER=$FM_PR_NUMBER
+# gh and gh-axi address github.com unless told otherwise, so a GitHub Enterprise
+# host is exported once here and every forge call this run makes addresses the
+# host the parsed identity names, including the gh merge command that carries
+# only owner and repository. A gitlab, gerrit, or forgejo run keeps its own
+# per-call host handling.
+if [ "$PROVIDER" = github ]; then
+  fm_pr_github_host_export "$PR_HOST"
+fi
 # glab resolves the instance from the project URL passed to -R, so the host is
 # rebuilt from the parsed identity rather than read from any ambient default.
 PROJECT_URL="https://$FM_PR_HOST/$FM_PR_PATH"
