@@ -148,6 +148,11 @@
 #                          source owned closes that episode); the queued
 #                          payload names what to check. These three kinds are
 #                          joined with `;` when more than one surfaces in a cycle
+#   check: pr-register: <lines>
+#                          with config/pr-register-scan present, a task's done
+#                          line reported a PR that the check sweep's
+#                          fm-pr-check.sh scan could not record; the line
+#                          names the task, the PR, and the refusal
 #   check: rejected unauthenticated state checks: <paths>
 #                          unsafe state checks were refused without execution
 #   check: rejected unauthenticated PR poll retirement receipts: <paths>
@@ -566,21 +571,9 @@ window_label() {
   [ -n "$task" ] && printf 'fm-%s' "$task"
 }
 
-# The ONE derivation of a window's per-window marker key: `:`, `/` and `.` become
-# `_` so a window name is usable as a filename suffix. Every per-window file the
-# watcher keeps is named by it (.hash-, .count-, .stale-, .stale-since-,
-# .wedge-escalations-, .wedge-permanent-, .wedge-terminal-queued-,
-# .wedge-rollback-failed-, .paused-*, .writing-*, .validating-*,
-# .waiting-*), and live homes
-# hold those markers on disk under the current format, so the format lives here
-# alone: a second copy is how a future change to it silently orphans a window's
-# markers instead of clearing them. The helpers below take the derived key
-# rather than re-deriving it, so one poll of one window derives it once.
-window_key() {  # <window>
-  local key=${1//:/_}
-  key=${key//\//_}
-  printf '%s' "${key//./_}"
-}
+# All per-window marker identities come from this shared owner.
+# shellcheck source=bin/fm-watch-key-lib.sh
+. "$SCRIPT_DIR/fm-watch-key-lib.sh"
 
 inbox_steer_escalate_unavailable() {  # <window> <task> <record>
   local w=$1 task=$2 rec=$3 reason
@@ -731,8 +724,8 @@ inbox_steer_check() {  # <window> <task>
 #
 # The evidence is the one the pane-staleness backbone below already trusts for
 # liveness: this compares a fresh capture against the .hash- marker that backbone
-# recorded on the previous poll, which is why the derivation lives here with the
-# marker format rather than in the shared classifier. Absorbing here DEFERS a wake
+# recorded on the previous poll; fm-watch-key-lib.sh owns its marker identity.
+# Absorbing here DEFERS a wake
 # rather than swallowing it, and the deferral is BOUNDED: a task's turn-ends may
 # ride churn evidence for at most FM_TURNEND_CHURN_ABSORB_SECS, tracked per window
 # in .churn-since-, after which the wake surfaces and the window restarts. The
@@ -3995,6 +3988,16 @@ while :; do
   if [ "$(age_of "$STATE/.last-check")" -ge "$CHECK_INTERVAL" ]; then
     rejected_checks=
     contribution_check_output=
+    # Record each PR a task reported but nobody recorded, so its merge poll
+    # below runs in this same sweep (bin/fm-pr-check.sh owns the scan).
+    pr_register_reason=
+    if [ -e "$CONFIG/pr-register-scan" ]; then
+      FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" run_check_capture "$SCRIPT_DIR/fm-pr-check.sh" scan || exit 1
+      if [ -n "$FM_CHECK_RESULT" ]; then
+        pr_register_reason="check: pr-register: $FM_CHECK_RESULT"
+        fm_wake_append check pr-register "$pr_register_reason" || exit 1
+      fi
+    fi
     for c in "$STATE"/*.check.sh; do
       [ -e "$c" ] || continue
       is_pr_poll=0
@@ -4059,7 +4062,9 @@ EOF
             continue
           fi
         fi
-        reason="check: $c: $out"
+        # One line, as the queued row stores it: wake consumers keep only
+        # prefixed lines, so a later output line would otherwise be dropped.
+        reason="check: $c: $(printf '%s' "$out" | fm_wake_clean_field)"
         if [ "$is_pr_poll" -eq 1 ] && [ "$out" = merged ]; then
           if [ "$(fm_meta_get "$STATE/$id.meta" kind)" = secondmate ]; then
             # A merge poll armed on a secondmate is residue: the mate is a
@@ -4115,6 +4120,7 @@ EOF
       wake "$reason"
     fi
     touch "$STATE/.last-check"
+    [ -z "$pr_register_reason" ] || wake "$pr_register_reason"
     if [ -n "$contribution_check_output" ]; then
       wake "$contribution_check_output"
     fi
