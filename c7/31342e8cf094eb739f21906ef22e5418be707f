@@ -1,0 +1,370 @@
+.agents/skills/harness-adapters/SKILL.md
+  h_7026a78c4bda37 36,101-102
+.agents/skills/harness-adapters/references/harness/claude.md
+  h_7026a78c4bda37 28
+.agents/skills/harness-adapters/references/harness/codex.md
+  h_7026a78c4bda37 47,49
+.agents/skills/harness-adapters/references/harness/hermes.md
+  h_7026a78c4bda37 1-37
+.agents/skills/operational-home-layout/SKILL.md
+  h_7026a78c4bda37 27,53,103
+.agents/skills/quota-array-dispatch/SKILL.md
+  h_7026a78c4bda37 4,44-54
+.agents/skills/secondmate-provisioning/SKILL.md
+  h_7026a78c4bda37 112
+.agents/skills/ship-landing/SKILL.md
+  h_7026a78c4bda37 13
+.claude/mods/firstmate-calm/hooks/register.ts
+  h_7026a78c4bda37 467,470
+.claude/mods/firstmate-calm/tests/support.ts
+  h_7026a78c4bda37 275,277,281-282,287-308
+.claude/mods/firstmate-calm/tests/working-ship.test.ts
+  h_7026a78c4bda37 5,46-53
+.codex/hooks.json
+  h_7026a78c4bda37 36
+AGENTS.md
+  h_7026a78c4bda37 92,94,109
+CONTRIBUTING.md
+  h_7026a78c4bda37 128,144-145
+bin/backends/herdr.sh
+  h_7026a78c4bda37 827-834,838-843,1892-1899,2793-2796,2798-2804,2808
+bin/backends/rex-eventwait.lua
+  h_7026a78c4bda37 8-10,40-41
+bin/backends/rex.sh
+  h_7026a78c4bda37 848,1262-1265,1304-1305
+bin/backends/tmux.sh
+  h_7026a78c4bda37 470-471,474,486
+bin/fm-agent-process-lib.sh
+  h_7026a78c4bda37 22-23,61,117-120
+bin/fm-backend.sh
+  h_7026a78c4bda37 1036,1039,1051,1057,1060
+bin/fm-backlog-transition-lib.sh
+  h_7026a78c4bda37 45-48,375-377,985-988,1162
+bin/fm-bearings-snapshot.sh
+  h_7026a78c4bda37 13-14,153,158-159,534-535,542-543,553-554
+bin/fm-bootstrap.sh
+  h_7026a78c4bda37 1177
+bin/fm-branch-prompt.sh
+  h_7026a78c4bda37 9-13,26-37,44-54,198-201
+bin/fm-brief.sh
+  h_7026a78c4bda37 619
+bin/fm-busy-event.sh
+  h_7026a78c4bda37 148-155,157-160,162-176
+bin/fm-busy-lib.sh
+  h_7026a78c4bda37 338
+bin/fm-classify-lib.sh
+  h_7026a78c4bda37 2723-2725
+bin/fm-claude-account-quota.sh
+  h_7026a78c4bda37 1-147
+bin/fm-claude-stop-autoarm.sh
+  h_7026a78c4bda37 18-22,44-46,49,221-224,232,255-257,289-290,301,398-404,422,442,454-457,470,473
+bin/fm-composer-lib.sh
+  h_7026a78c4bda37 118-120,580,1942-1980,2003-2004,2021-2022,2024,2141,2285-2310,2342-2345,2414
+bin/fm-control-lib.sh
+  h_7026a78c4bda37 67,97,122,140,161,167-168,173,193,208,231,255,273,294,561-562
+bin/fm-control.sh
+  h_7026a78c4bda37 8,87-90,271,275,288,306-307,325-326,328,504-506,886,1064-1081,1085-1086,1090-1091,1093,1270
+bin/fm-dispatch-resolve.sh
+  h_7026a78c4bda37 11-12,110-111,116,243-275,284,289,542,547,566-569
+bin/fm-fleet-snapshot.sh
+  h_7026a78c4bda37 95-97,1013,1121
+bin/fm-harness.sh
+  h_7026a78c4bda37 3,82-83,89-91,200-204,274,450
+bin/fm-hermes-hook.sh
+  h_7026a78c4bda37 1-26
+bin/fm-hermes-lib.sh
+  h_7026a78c4bda37 1-207
+bin/fm-hermes-process-lib.sh
+  h_7026a78c4bda37 1-41
+bin/fm-inactive-reconcile.sh
+  h_7026a78c4bda37 70-79,108-114,137-138,602-628,630,645,659-662
+bin/fm-lab-home.sh
+  h_7026a78c4bda37 20-23
+bin/fm-live-lab.sh
+  h_7026a78c4bda37 99-102,104-105,167-172,174-180,183-194,571-572,788
+bin/fm-lock.sh
+  h_7026a78c4bda37 257,285,288
+bin/fm-osc7501.sh
+  h_7026a78c4bda37 1-640
+bin/fm-pr-check.sh
+  h_7026a78c4bda37 25-42,44,60-150,322-327
+bin/fm-pr-merge.sh
+  h_7026a78c4bda37 16-19,56-64,84-110,207-209,221,299,303,310-317,350-367,372-379,653-662,761-766,772,903-908,991,1000-1002,1134,1137-1142,1186-1187,1192-1208,1213,1218-1220,1222-1224,1226-1230,1232,1254,1271,1277,1286,1293-1299,1320-1382,1929-1935
+bin/fm-procevent.sh
+  h_7026a78c4bda37 1601-1603
+bin/fm-procinfo.py
+  h_7026a78c4bda37 1-185
+bin/fm-record-export.py
+  h_7026a78c4bda37 432-433,1150-1153,1159-1163
+bin/fm-remote-inherit-push.sh
+  h_7026a78c4bda37 15-20,28,34-35,111-125
+bin/fm-remote-inherit.sh
+  h_7026a78c4bda37 2,7,12-14,50-105,152-153
+bin/fm-secondmate-nudge-lib.sh
+  h_7026a78c4bda37 32-35,42-44,46,48-53
+bin/fm-session-lock-lib.sh
+  h_7026a78c4bda37 14-16,278-559,579,581-582,590,643-691,697-699,730-759,789,801-802,883-887,898,926,951-960,962-974
+bin/fm-spawn.sh
+  h_7026a78c4bda37 4-5,67,78-85,105-113,144-145,510-516,995-996,1006-1007,1035-1038,1067-1070,1105-1106,1142-1146,1166-1173,1198-1207,1681,1794,1797-1799,1960-1978,2151,2161,2566-2595,2637,3118-3119,3262,3292-3320,3488-3496,5476-5493,5514,5518-5523,5528-5530,5533-5536,6025-6029,6096-6101,6431,6524-6528,7230,7272,7511-7518,7577,7686-7719,7997-8027
+bin/fm-supervise-daemon.sh
+  h_7026a78c4bda37 182-183,605,630,647
+bin/fm-supervision-engine-lib.sh
+  h_7026a78c4bda37 58
+bin/fm-supervision-instructions.sh
+  h_7026a78c4bda37 107-109
+bin/fm-teardown.sh
+  h_7026a78c4bda37 18-19,46-50,83-84,212-214,272-274,1696,1805-1808,1815-1825,2126-2155,2157-2160,2170-2180,2182,2190-2204,2222,2245,3652,3800,3825-3942,4104,4108,4191,4212
+bin/fm-test-linux.sh
+  h_7026a78c4bda37 1-121
+bin/fm-test-run.sh
+  h_7026a78c4bda37 296-297,305,308-309,372,377,450,774,820,829,836,850,907,940,1496-1500,1530-1532,1651,1659-1661
+bin/fm-timeout-lib.sh
+  h_7026a78c4bda37 16,30-39,79,85,116-145,153,192-193,198,205,243-317
+bin/fm-tmux-lib.sh
+  h_7026a78c4bda37 2-4,114-116,118-119,121,125,133-136,168-170,176-183
+bin/fm-tool-update-check.sh
+  h_7026a78c4bda37 38-40,159,237,269-275,277,351-360,402-403,438-439,441-442,444-445,468,482,539-544,556-557,559-560,576-628,817,837,840-842
+bin/fm-turnend-guard-cursor.sh
+  h_7026a78c4bda37 265-268,272
+bin/fm-turnend-guard.sh
+  h_7026a78c4bda37 69,318-321
+bin/fm-vendor-auth-probe.sh
+  h_7026a78c4bda37 62-63,125
+bin/fm-wake-drain.sh
+  h_7026a78c4bda37 544
+bin/fm-wake-lib.sh
+  h_7026a78c4bda37 1670-1671,1711-1712,1714-1718,1725,1941-1943,1953,2309-2324,2331,2354-2365,2395-2397,2400-2401,2409,2420-2421,2429-2431,2444-2446,2889-2894
+bin/fm-watch-key-lib.sh
+  h_7026a78c4bda37 1-32
+bin/fm-watch.sh
+  h_7026a78c4bda37 151-155,574-576,727-728,3991-4000,4065-4067,4123
+bin/fm-worker-account-lib.sh
+  h_7026a78c4bda37 55-68,190-253,320-333,335-341,343-362,366-367,369-403
+docs/agent-control.md
+  h_7026a78c4bda37 44-45,84,200-202
+docs/architecture.md
+  h_7026a78c4bda37 112-113,126,440
+docs/calm.md
+  h_7026a78c4bda37 210
+docs/captain-hold-lifecycle.md
+  h_7026a78c4bda37 170,179,408-410,656,661-662,670
+docs/configuration.md
+  h_7026a78c4bda37 12,665-667,674-678,820-829,929,1284-1287,1562-1592,1663-1673,1967,1969-1976,2079,2143,2354-2357,2371-2372,2384-2401,2427-2428,3186,3336,3421,3545,3548-3554
+docs/documentation-audiences.json
+  h_7026a78c4bda37 236-239,584-587
+docs/examples/watched-tools.json
+  h_7026a78c4bda37 14-34
+docs/fm-test-portable-shards.md
+  h_7026a78c4bda37 29-31,36
+docs/herdr-backend.md
+  h_7026a78c4bda37 144-145,304-305,371-375,838
+docs/pi-supervision-branch.md
+  h_7026a78c4bda37 615
+docs/remote-secondmates.md
+  h_7026a78c4bda37 663-667
+docs/rex-backend.md
+  h_7026a78c4bda37 122,136-137
+docs/scripts.md
+  h_7026a78c4bda37 50,57-58,112,163
+docs/sessionstart-nudge.md
+  h_7026a78c4bda37 214
+docs/supervision-host.md
+  h_7026a78c4bda37 401
+docs/tmux-backend.md
+  h_7026a78c4bda37 68
+docs/trace-context.md
+  h_7026a78c4bda37 26
+docs/turnend-guard.md
+  h_7026a78c4bda37 100,275-278,410-416,432,450-451
+docs/verification/agy.md
+  h_7026a78c4bda37 87
+docs/verification/dispatch-resolve.md
+  h_7026a78c4bda37 298,302
+docs/verification/hermes.md
+  h_7026a78c4bda37 1-153
+docs/verification/process-event-sources.md
+  h_7026a78c4bda37 114,192-201
+docs/verification/runtime-backends.md
+  h_7026a78c4bda37 142-145,395,402-403,807-830,971,1399-1415,1565,1580,1590-1649
+docs/watcher-continuity.md
+  h_7026a78c4bda37 97-101,121,536,543
+tests/assets/board-render-harness.mjs
+  h_7026a78c4bda37 7,30-36,120-122,136
+tests/captures/claude-2.1.291-slash-popup/exit-typed-with-notice.ansi
+  h_7026a78c4bda37 1-10
+tests/captures/claude-2.1.291-slash-popup/exit-typed.ansi
+  h_7026a78c4bda37 1-11
+tests/captures/claude-2.1.291-slash-popup/idle.ansi
+  h_7026a78c4bda37 1-5
+tests/captures/claude-2.1.291-slash-popup/no-mistakes-typed.ansi
+  h_7026a78c4bda37 1-5
+tests/captures/claude-2.1.291-slash-popup/slash-only.ansi
+  h_7026a78c4bda37 1-9
+tests/captures/claude-2.1.291-slash-popup/truncated-name.ansi
+  h_7026a78c4bda37 1-7
+tests/fm-afk-return.test.sh
+  h_7026a78c4bda37 487,524,964
+tests/fm-agy-primary.test.sh
+  h_7026a78c4bda37 62
+tests/fm-assertions.test.sh
+  h_7026a78c4bda37 1-43
+tests/fm-backend-herdr-presentation-e2e.test.sh
+  h_7026a78c4bda37 146-156,159-171,237-238,903,905,912-913
+tests/fm-backend-herdr.test.sh
+  h_7026a78c4bda37 945-979,1267,1275-1306,5357-5359,5604-5695,6428-6485,6515,6529,6709-6711,6738-6740
+tests/fm-backend-rex.test.sh
+  h_7026a78c4bda37 923-925,930-932
+tests/fm-backend-t3code.test.sh
+  h_7026a78c4bda37 19,1109
+tests/fm-backend.test.sh
+  h_7026a78c4bda37 1016-1068,1731,1736-1738,1770-1771
+tests/fm-backlog-atomicity.test.sh
+  h_7026a78c4bda37 1627-1652,2088-2108,3156,3175
+tests/fm-bearings-board-render.test.sh
+  h_7026a78c4bda37 97,100,102,269-298
+tests/fm-bearings-snapshot.test.sh
+  h_7026a78c4bda37 1741-1746,1788-1792,3372-3454,3456-3457
+tests/fm-bootstrap-network-parallel.test.sh
+  h_7026a78c4bda37 128,459-464,779,788,793,797,799-802
+tests/fm-branch-supervision.test.sh
+  h_7026a78c4bda37 34,75-118,1659
+tests/fm-busy-state.test.sh
+  h_7026a78c4bda37 168-273,831-834
+tests/fm-claude-account-quota.test.sh
+  h_7026a78c4bda37 1-194
+tests/fm-claude-stop-autoarm.test.sh
+  h_7026a78c4bda37 38,255,257-263,265-268,270,871-1075,2242-2246
+tests/fm-codex-hook-layer-live-e2e.test.sh
+  h_7026a78c4bda37 19-23,29,107-300,303
+tests/fm-composer-lib.test.sh
+  h_7026a78c4bda37 367-462,1691-1692
+tests/fm-control-relaunch.test.sh
+  h_7026a78c4bda37 1000-1084,1867-1911,3169-3171,3197-3199
+tests/fm-control.test.sh
+  h_7026a78c4bda37 725-746,1345
+tests/fm-cortex-harness.test.sh
+  h_7026a78c4bda37 198,217
+tests/fm-daemon.test.sh
+  h_7026a78c4bda37 1144,1168,1184
+tests/fm-dispatch-resolve.test.sh
+  h_7026a78c4bda37 12,432,451-571,587,961,1100-1108
+tests/fm-extension-binding.test.sh
+  h_7026a78c4bda37 442-445,447,454,458,470-471,475,513,2071,2147-2152,2154-2167,2169-2181
+tests/fm-gate-refuse.test.sh
+  h_7026a78c4bda37 246-248,261-262,267
+tests/fm-gotmp.test.sh
+  h_7026a78c4bda37 61,170
+tests/fm-herdr-projected-cd-live-e2e.test.sh
+  h_7026a78c4bda37 1-114
+tests/fm-herdr-submit-confirm-live-e2e.test.sh
+  h_7026a78c4bda37 8-14,183-222
+tests/fm-hermes-gateway-coexistence-live-e2e.test.sh
+  h_7026a78c4bda37 1-100
+tests/fm-hermes-harness.test.sh
+  h_7026a78c4bda37 1-240
+tests/fm-hermes-profile-safety-live-e2e.test.sh
+  h_7026a78c4bda37 1-86
+tests/fm-hermes-signals-live-e2e.test.sh
+  h_7026a78c4bda37 1-154
+tests/fm-inactive-reconcile.test.sh
+  h_7026a78c4bda37 45-52,185-240,1041-1074,1422-1426,1459
+tests/fm-install-herdr.test.sh
+  h_7026a78c4bda37 1-30
+tests/fm-kimi-harness.test.sh
+  h_7026a78c4bda37 141,346,722
+tests/fm-lint.test.sh
+  h_7026a78c4bda37 173,175,532,548
+tests/fm-live-lab-isolation.test.sh
+  h_7026a78c4bda37 1-299
+tests/fm-live-lab-up-mate.test.sh
+  h_7026a78c4bda37 8-9,30-34
+tests/fm-live-lab.test.sh
+  h_7026a78c4bda37 20-22,32-34,43-44,75,132-133,650-653,656-657
+tests/fm-merge-local.test.sh
+  h_7026a78c4bda37 164
+tests/fm-osc7501.test.sh
+  h_7026a78c4bda37 1-1214
+tests/fm-pr-check-security.test.sh
+  h_7026a78c4bda37 159,764-987,1874-1875,1896,1911,4138-4146
+tests/fm-pr-merge.test.sh
+  h_7026a78c4bda37 188-191,199-206,208-212,221-225,253-267,291-309,328-331,420-423,428-441,587-590,750-753,2726-3142,3445-3546,3788-4082,5502-5505,5545-5550
+tests/fm-procevent.test.sh
+  h_7026a78c4bda37 158-259
+tests/fm-public-followup.test.sh
+  h_7026a78c4bda37 429,640,660-662,721
+tests/fm-record-export.test.sh
+  h_7026a78c4bda37 85-113,802-803
+tests/fm-remote-doctor.test.sh
+  h_7026a78c4bda37 480,770
+tests/fm-remote-inherit-generation.test.sh
+  h_7026a78c4bda37 1-166
+tests/fm-remote-transport-lanes.test.sh
+  h_7026a78c4bda37 56
+tests/fm-secondmate-harness.test.sh
+  h_7026a78c4bda37 948,970
+tests/fm-secondmate-restart.test.sh
+  h_7026a78c4bda37 273,428,710,930
+tests/fm-session-lock-ancestry.test.sh
+  h_7026a78c4bda37 629-706,1657
+tests/fm-session-lock-ps-denied.test.sh
+  h_7026a78c4bda37 1-979
+tests/fm-spawn-compact-adviser-disable.test.sh
+  h_7026a78c4bda37 259,336
+tests/fm-spawn-dispatch-profile.test.sh
+  h_7026a78c4bda37 179,199,234,277,304,333,353,381,518,557,639,647-731,742,765,782,798,814,835,865,901,924,941,960,979,1031,1050,1074,1093,1111,1137,1159,1190,1287,1364,1403,1437,1459,1484,1545,1572,1592,1615,1649,1927,1965,1980,2002,2025,2041,2074,2100,2115,2135,2151,2181,2202,2253,2488,2592,2608,2626,2643,2677,2716,2748,2832,2859-2860
+tests/fm-spawn-herdr-lease.test.sh
+  h_7026a78c4bda37 1-304
+tests/fm-task-delivery.test.sh
+  h_7026a78c4bda37 250-251,262-263
+tests/fm-teardown.test.sh
+  h_7026a78c4bda37 66-77,914-1158,1198-1221,4216-4289,6303-6427,6430,6458-6467,6470,6493-6494
+tests/fm-test-linux.test.sh
+  h_7026a78c4bda37 1-117
+tests/fm-test-run.test.sh
+  h_7026a78c4bda37 308-334,1932
+tests/fm-timeout-lib.test.sh
+  h_7026a78c4bda37 451-568,586-1016,1023
+tests/fm-tmux-agent-liveness.test.sh
+  h_7026a78c4bda37 73-75,259-316,559-616
+tests/fm-tool-update-check.test.sh
+  h_7026a78c4bda37 205-224,420,602-619,848-1187,1578-1586,1592,1609
+tests/fm-turnend-guard.test.sh
+  h_7026a78c4bda37 191,946,956,959,963,965-967,972,980,996,1002,1004-1005,1010-1108,2163-2166,2168,2712
+tests/fm-wake-queue.test.sh
+  h_7026a78c4bda37 198,230,273-300,350-365,3812,3815
+tests/fm-watch-triage-pause.test.sh
+  h_7026a78c4bda37 39,81,139,229,275,297,360,455,537,597,842,876,903,925,950,1007,1037,1109,1166,1190,1213,1260,1294,1374,1421
+tests/fm-watch-triage-wedge-defer.test.sh
+  h_7026a78c4bda37 32,115,151,250,355,509,574,642,725,764,767-768,782-783,785,796,838,907,944
+tests/fm-watch-triage.test.sh
+  h_7026a78c4bda37 835,871,915,951,987,1015,1056,1131,1161,1191,1208,1220,1252-1253,1289-1290,1329,1368,1404,1437,1466,1496,1528,1570-1571,2229,2265,2319,2392,2436,2502,2542,2591,2660,2707,2778,2856,2911,3152,3178,3223,3265,3299,3335,3395,3502,3607,3692,3734,3790,3858,3912,3953,4022,4697,4721,4812,4884,4966,5009,5137,5287-5424,5438-5440
+tests/fm-watch-wedge-cap-live.test.sh
+  h_7026a78c4bda37 197-199,419
+tests/fm-watch-wedge-cap-unconfigured-parity.test.sh
+  h_7026a78c4bda37 153,164
+tests/fm-watch-wedge-cap.test.sh
+  h_7026a78c4bda37 112,136,168,228,268,321,356,414,508,618,667,727,760,878,951,1022,1117,1188,1247,1335,1396,1465,1513,1573,1656,1761,1858
+tests/fm-watcher-lock.test.sh
+  h_7026a78c4bda37 1234-1294,1450-1455,2473-2477
+tests/fm-worker-account.test.sh
+  h_7026a78c4bda37 488-632,636,650-653
+tests/lib.sh
+  h_7026a78c4bda37 170-187,581-622,1005-1014
+tests/linux/Dockerfile
+  h_7026a78c4bda37 1-2
+tests/wake-helpers.sh
+  h_7026a78c4bda37 56-68
+tests/watch-triage-helpers.sh
+  h_7026a78c4bda37 230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c731342e8cf094eb739f21906ef22e5418be707f",
+  "prompts": {},
+  "humans": {
+    "h_7026a78c4bda37": {
+      "author": "rshinde-asapp <rshinde@asapp.com>"
+    }
+  }
+}
